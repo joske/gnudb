@@ -43,8 +43,14 @@ pub fn gnudb(discid: &DiscId) -> Result<Disc, String> {
             let proto = "proto 6\n".to_owned();
             send_command(&mut stream, proto).unwrap();
 
+            // the protocol is as follows:
+            // cddb query discid ntrks off1 off2 ... nsecs
+
+            // CDs don't *have* to start at track number 1...
             let count = discid.last_track_num() - discid.first_track_num() + 1;
             let mut toc = discid.toc_string();
+            // the toc from DiscId is total_sectors first_track off1 off2 ... offn 
+            // so we take from the 3rd item in the toc
             toc = toc
                 .match_indices(" ")
                 .nth(2)
@@ -69,7 +75,7 @@ pub fn gnudb(discid: &DiscId) -> Result<Disc, String> {
         }
     }
     println!("Terminated.");
-    return Err("".to_owned());
+    return Err("Failed to get disc info".to_owned());
 }
 
 /// send a CDDBP command, and parse its output, according to the protocol specs:
@@ -145,6 +151,8 @@ fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
     }
 }
 
+/// specific command to query the disc, first issues a query, and then a read
+/// query protocol: cddb query discid ntrks off1 off2 ... nsecs
 fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Disc, String> {
     let response = send_command(stream, cmd);
     if response.is_ok() {
@@ -159,7 +167,7 @@ fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Di
             stream.shutdown(Shutdown::Both).unwrap();
             return Ok(disc);
         } else if response.starts_with("211") {
-            // inexact match - we take first hit for now
+            // inexact match - we just take first hit for now
             let response = response.lines().nth(1).unwrap();
             let mut split = response.split(" ");
             let category = split.next().unwrap();
@@ -179,6 +187,8 @@ fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Di
     }
 }
 
+/// read and parse the disc info
+/// protocol: cddb read category discid
 fn cddb_read(category: &str, discid: &str, stream: &mut TcpStream) -> Disc {
     let get = format!("cddb read {} {}\n", category, discid);
     let data = send_command(stream, get).unwrap();
@@ -209,8 +219,10 @@ fn parse_data(data: String) -> Disc {
             let value = line.split("=").nth(1).unwrap();
             disc.genre = Some(value.to_owned());
         }
+        // since we use protocol level 6, we should get the year/genre via DYEAR and DGENRE, and these should come before EXTD
+        // this is as a fallback
         if disc.year.is_none() && line.starts_with("EXTD") {
-            // little bit awkward, can this be done better?
+            // little bit awkward, can this be done better? 
             let year_matches: Vec<_> = line.match_indices("YEAR:").collect();
             if year_matches.len() > 0 {
                 let index = year_matches[0].0 + 6;
@@ -226,11 +238,11 @@ fn parse_data(data: String) -> Disc {
             let mut track = Track {
                 ..Default::default()
             };
-            track.number = i + 1;
+            track.number = i + 1; // tracks are 0 based in CDDB/GNUDB
             track.title = line.split("=").nth(1).unwrap().to_owned();
             track.artist = disc.artist.clone();
             disc.tracks.push(track);
-            i += 1;
+            i += 1; // assume tracks are consecutive - this is not necessarily true
         }
     }
     disc
@@ -254,6 +266,7 @@ mod test {
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978 as u16);
+        assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
     }
@@ -313,6 +326,8 @@ PLAYORDER="
         let disc = super::parse_data(input);
         assert_eq!(disc.year.unwrap(), 2002 as u16);
         assert_eq!(disc.title, "(black) Mutter");
+        assert_eq!(disc.tracks.len(), 11);
+        assert_eq!(disc.genre.unwrap(), "Industrial Metal");
     }
 
     #[test]
@@ -364,6 +379,7 @@ PLAYORDER="
         let disc = super::parse_data(input);
         assert_eq!(disc.year.unwrap(), 1978 as u16);
         assert_eq!(disc.genre.unwrap(), "Rock");
+        assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.title, "Dire Straits");
     }
 }
