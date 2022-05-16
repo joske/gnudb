@@ -2,13 +2,12 @@
 name = "gnudb"
 version = "0.1.0"
 edition = "2021"
-license = "LGPL"
+license = "MIT"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
 homepage = "https://github.com/joske/gnudb"
 repository = "https://github.com/joske/gnudb"
 readme = "README.md"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
 discid = "0.4"
