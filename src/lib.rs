@@ -1,5 +1,6 @@
-// id=ZDiPhVnBWu4wjogok6g2cGpgeNQ-
-// DiscId 1 9 186755 150 18230 42558 57591 76417 89846 115065 143250 164582
+//! Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)
+//! 
+//! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
 
 use std::{
     io::{BufRead, BufReader, Write},
@@ -26,21 +27,22 @@ pub struct Track {
     pub composer: Option<String>,
 }
 
-pub fn search_disc(discid: &DiscId) -> Result<Disc, String> {
-    gnudb(discid)
-}
-
-fn gnudb(discid: &DiscId) -> Result<Disc, String> {
+/// search gnudb for a given discid
+pub fn gnudb(discid: &DiscId) -> Result<Disc, String> {
     match TcpStream::connect("gnudb.gnudb.org:8880") {
         Ok(mut stream) => {
             println!("Successfully connected to server in port 8880");
+            // say hello -> this is the login
             let mut hello = String::new();
             let mut reader = BufReader::new(stream.try_clone().unwrap());
             reader.read_line(&mut hello).unwrap();
             let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
             send_command(&mut stream, hello).unwrap();
+            
+            // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
             let proto = "proto 6\n".to_owned();
             send_command(&mut stream, proto).unwrap();
+
             let count = discid.last_track_num() - discid.first_track_num() + 1;
             let mut toc = discid.toc_string();
             toc = toc
@@ -70,6 +72,24 @@ fn gnudb(discid: &DiscId) -> Result<Disc, String> {
     return Err("".to_owned());
 }
 
+/// send a CDDBP command, and parse its output, according to the protocol specs:
+/// Server response code (three digit code):
+///
+/// First digit:
+/// 1xx	Informative message
+/// 2xx	Command OK
+/// 3xx	Command OK so far, continue
+/// 4xx	Command OK, but cannot be performed for some specified reasons
+/// 5xx	Command unimplemented, incorrect, or program error
+/// 
+/// Second digit:
+/// x0x	Ready for further commands
+/// x1x	More server-to-client output follows (until terminating marker)
+/// x2x	More client-to-server input follows (until terminating marker)
+/// x3x	Connection will close
+///
+/// Third digit:
+/// xx[0-9]	Command-specific code
 fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
     let msg = cmd.as_bytes();
     stream.write(msg).unwrap();
@@ -167,6 +187,7 @@ fn cddb_read(category: &str, discid: &str, stream: &mut TcpStream) -> Disc {
     disc
 }
 
+/// parse the full response from the CDDB server
 fn parse_data(data: String) -> Disc {
     println!("{}", data);
     let mut disc = Disc {
