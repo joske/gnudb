@@ -6,4 +6,6 @@ Right now only login, query and read are implemented, and only over CDDBP (not H
 
 Usage:
 let discid = DiscId::read(Some(DiscId::default_device().as_str())).unwrap();
-let disc = gnudb::gnudb(&discid).unwrap();
+let mut con = gnudb::Connection::new();
+con.login();
+let disc = con.search(&discid).unwrap();

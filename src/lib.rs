@@ -1,5 +1,5 @@
 //! Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)
-//! 
+//!
 //! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
 
 use std::{
@@ -9,13 +9,96 @@ use std::{
 
 use discid::DiscId;
 
+#[derive(Debug)]
+pub struct Connection {
+    stream: TcpStream,
+    logged_in : bool,
+}
+
+impl Connection {
+    /// create a new connection to given host:port combination
+    pub fn from_host_port(host: &str, port: u16) -> Self {
+        let s = format!("{}:{}", host, port);
+        Connection {
+            stream: TcpStream::connect(s).unwrap(),
+            logged_in: false,
+        }
+    }
+
+    /// create a new connection to gnudb.gnudb.org port 8880
+    pub fn new() -> Self {
+        Connection {
+            stream: TcpStream::connect("gnudb.gnudb.org:8880").unwrap(),
+            logged_in: false,
+        }
+    }
+
+    /// login into gnudb
+    pub fn login(&mut self) {
+        println!("Successfully connected to server in port 8880");
+        // say hello -> this is the login
+        let mut hello = String::new();
+        let mut reader = BufReader::new(self.stream.try_clone().unwrap());
+        reader.read_line(&mut hello).unwrap();
+        let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
+        send_command(&mut self.stream, hello).unwrap();
+
+        // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
+        let proto = "proto 6\n".to_owned();
+        send_command(&mut self.stream, proto).unwrap();
+        self.logged_in = true;
+    }
+
+    /// search gnudb for a given discid
+    pub fn search(&mut self, discid: &DiscId) -> Result<Disc, String> {
+        if !self.logged_in {
+            return Err("Not logged in".to_owned());
+        }
+        // the protocol is as follows:
+        // cddb query discid ntrks off1 off2 ... nsecs
+
+        // CDs don't *have* to start at track number 1...
+        let count = discid.last_track_num() - discid.first_track_num() + 1;
+        let mut toc = discid.toc_string();
+        // the toc from DiscId is total_sectors first_track off1 off2 ... offn
+        // so we take from the 3rd item in the toc
+        toc = toc
+            .match_indices(" ")
+            .nth(2)
+            .map(|(index, _)| toc.split_at(index))
+            .unwrap()
+            .1
+            .to_owned();
+        let query = format!(
+            "cddb query {} {} {} {}\n",
+            discid.freedb_id(),
+            count,
+            toc,
+            discid.sectors() / 75
+        );
+        let disc = cddb_query(&mut self.stream, query, discid);
+
+        return disc;
+    }
+
+    pub fn close(&mut self) {
+        self.stream.shutdown(Shutdown::Both).unwrap();
+    }
+}
+
+impl Drop for Connection {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct Disc {
     pub title: String,
     pub artist: String,
     pub year: Option<u16>,
     pub genre: Option<String>,
-    pub tracks: Vec<Track>
+    pub tracks: Vec<Track>,
 }
 
 #[derive(Default, Debug)]
@@ -27,57 +110,6 @@ pub struct Track {
     pub composer: Option<String>,
 }
 
-/// search gnudb for a given discid
-pub fn gnudb(discid: &DiscId) -> Result<Disc, String> {
-    match TcpStream::connect("gnudb.gnudb.org:8880") {
-        Ok(mut stream) => {
-            println!("Successfully connected to server in port 8880");
-            // say hello -> this is the login
-            let mut hello = String::new();
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            reader.read_line(&mut hello).unwrap();
-            let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
-            send_command(&mut stream, hello).unwrap();
-            
-            // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
-            let proto = "proto 6\n".to_owned();
-            send_command(&mut stream, proto).unwrap();
-
-            // the protocol is as follows:
-            // cddb query discid ntrks off1 off2 ... nsecs
-
-            // CDs don't *have* to start at track number 1...
-            let count = discid.last_track_num() - discid.first_track_num() + 1;
-            let mut toc = discid.toc_string();
-            // the toc from DiscId is total_sectors first_track off1 off2 ... offn 
-            // so we take from the 3rd item in the toc
-            toc = toc
-                .match_indices(" ")
-                .nth(2)
-                .map(|(index, _)| toc.split_at(index))
-                .unwrap()
-                .1
-                .to_owned();
-            let query = format!(
-                "cddb query {} {} {} {}\n",
-                discid.freedb_id(),
-                count,
-                toc,
-                discid.sectors() / 75
-            );
-            let disc = cddb_query(&mut stream, query, discid);
-
-            stream.shutdown(Shutdown::Both).unwrap();
-            return disc;
-        }
-        Err(e) => {
-            println!("Failed to connect: {}", e);
-        }
-    }
-    println!("Terminated.");
-    return Err("Failed to get disc info".to_owned());
-}
-
 /// send a CDDBP command, and parse its output, according to the protocol specs:
 /// Server response code (three digit code):
 ///
@@ -87,7 +119,7 @@ pub fn gnudb(discid: &DiscId) -> Result<Disc, String> {
 /// 3xx	Command OK so far, continue
 /// 4xx	Command OK, but cannot be performed for some specified reasons
 /// 5xx	Command unimplemented, incorrect, or program error
-/// 
+///
 /// Second digit:
 /// x0x	Ready for further commands
 /// x1x	More server-to-client output follows (until terminating marker)
@@ -222,7 +254,7 @@ fn parse_data(data: String) -> Disc {
         // since we use protocol level 6, we should get the year/genre via DYEAR and DGENRE, and these should come before EXTD
         // this is as a fallback
         if disc.year.is_none() && line.starts_with("EXTD") {
-            // little bit awkward, can this be done better? 
+            // little bit awkward, can this be done better?
             let year_matches: Vec<_> = line.match_indices("YEAR:").collect();
             if year_matches.len() > 0 {
                 let index = year_matches[0].0 + 6;
@@ -252,23 +284,35 @@ fn parse_data(data: String) -> Disc {
 mod test {
     use discid::DiscId;
 
-    use crate::gnudb;
+    use crate::Connection;
 
     #[test]
-    fn test_gnudb() {
+    fn test_search() {
         let offsets = [
             185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
-        println!("freedb id: {}", discid.freedb_id());
-        println!("mb id: {}", discid.id());
-        let disc = gnudb(&discid);
+        let mut con = Connection::new();
+        con.login();
+        let disc = con.search(&discid);
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978 as u16);
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
+    }
+
+    #[test]
+    fn test_search_should_be_logged_in() {
+        let offsets = [
+            185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
+        ];
+        let discid = DiscId::put(1, &offsets).unwrap();
+        let mut con = Connection::new();
+        // no login -> search should fail
+        let disc = con.search(&discid);
+        assert!(disc.is_err());
     }
 
     #[test]
