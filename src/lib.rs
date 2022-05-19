@@ -63,13 +63,8 @@ impl Connection {
         let mut toc = discid.toc_string();
         // the toc from DiscId is total_sectors first_track off1 off2 ... offn
         // so we take from the 3rd item in the toc
-        toc = toc
-            .match_indices(" ")
-            .nth(2)
-            .map(|(index, _)| toc.split_at(index))
-            .unwrap()
-            .1
-            .to_owned();
+        let mut split = toc.splitn(4, " ");
+        toc = split.nth(3).unwrap().to_owned(); // this should be the rest of the string
         let query = format!(
             "cddb query {} {} {} {}\n",
             discid.freedb_id(),
@@ -240,14 +235,14 @@ fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
 /// parse a line of inexact matches
 fn parse_matches(line: &str, discid: String) -> Match {
     let mut split = line.splitn(3, " ");
-    let _ = split.next();
     let category = split.next().unwrap();
+    let id = split.next().unwrap();
     let remainder = split.next().unwrap();
     let mut split = remainder.split("/");
     let title = split.next().unwrap().trim();
     let artist = split.next().unwrap().trim();
     Match {
-        discid: discid.to_owned(),
+        discid: id.to_owned(),
         category: category.to_owned(),
         title: title.to_owned(),
         artist: artist.to_owned(),
@@ -279,17 +274,10 @@ fn parse_data(data: String) -> Disc {
         // since we use protocol level 6, we should get the year/genre via DYEAR and DGENRE, and these should come before EXTD
         // this is as a fallback
         if disc.year.is_none() && line.starts_with("EXTD") {
-            // little bit awkward, can this be done better?
-            let year_matches: Vec<_> = line.match_indices("YEAR:").collect();
-            if year_matches.len() > 0 {
-                let index = year_matches[0].0 + 6;
-                let value = line.split_at(index).1;
-                let space_matches: Vec<_> = value.match_indices(" ").collect();
-                if space_matches.len() > 0 {
-                    let value = value.split_at(space_matches[0].0).0;
-                    disc.year = Some(value.parse::<u16>().unwrap());
-                }
-            }
+            let mut split = line.splitn(2, "YEAR:");
+            let y = split.nth(1).unwrap();
+            split = y.splitn(2, " ");
+            disc.year = Some(split.next().unwrap().parse::<u16>().unwrap());
         }
         if line.starts_with("TTITLE") {
             let mut track = Track {
@@ -317,12 +305,34 @@ mod test {
             185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
+        println!("freedb {}", discid.freedb_id());
         let mut con = Connection::new().unwrap();
         let matches = con.query(&discid);
         assert!(matches.is_ok());
         let matches = matches.unwrap();
         assert_eq!(matches.len(), 1);
         let disc = con.read(&matches[0]);
+        assert!(disc.is_ok());
+        let disc = disc.unwrap();
+        assert_eq!(disc.year.unwrap(), 1978 as u16);
+        assert_eq!(disc.tracks.len(), 9);
+        assert_eq!(disc.genre.unwrap(), "Rock");
+        assert_eq!(disc.title, "Dire Straits");
+    }
+
+    #[test]
+    fn test_inexact_search() {
+        let offsets = [
+            185710, 150, 18075, 42275, 57184, 75952, 89333, 114386, 142451, 163642,
+        ];
+        let discid = DiscId::put(1, &offsets).unwrap();
+        println!("freedb {}", discid.freedb_id());
+        let mut con = Connection::new().unwrap();
+        let matches = con.query(&discid);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        assert_eq!(matches.len(), 13);
+        let disc = con.read(&matches[2]);
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978 as u16);
