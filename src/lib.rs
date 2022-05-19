@@ -72,7 +72,7 @@ impl Connection {
             toc,
             discid.sectors() / 75
         );
-        cddb_query(&mut self.stream, query, discid)
+        cddb_query(&mut self.stream, query)
     }
 
     /// read all data of a given disc
@@ -114,7 +114,7 @@ impl Drop for Connection {
 
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
-fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Vec<Match>, String> {
+fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
     let response = send_command(stream, cmd)?;
     let mut matches: Vec<Match> = Vec::new();
     for ref line in response.lines() {
@@ -140,7 +140,7 @@ fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Ve
         if line.starts_with("211") {
             continue; // ignore first status line
         }
-        let m = parse_matches(line, discid.freedb_id());
+        let m = parse_matches(line);
         matches.push(m);
     }
     return Ok(matches);
@@ -233,7 +233,7 @@ fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
 }
 
 /// parse a line of inexact matches
-fn parse_matches(line: &str, discid: String) -> Match {
+fn parse_matches(line: &str) -> Match {
     let mut split = line.splitn(3, " ");
     let category = split.next().unwrap();
     let id = split.next().unwrap();
