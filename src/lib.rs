@@ -343,18 +343,6 @@ mod test {
     }
 
     #[test]
-    fn test_search_should_be_logged_in() {
-        let offsets = [
-            185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
-        ];
-        let discid = DiscId::put(1, &offsets).unwrap();
-        let mut con = Connection::new().unwrap();
-        // no login -> search should fail
-        let disc = con.query(&discid);
-        assert!(disc.is_err());
-    }
-
-    #[test]
     fn test_parse() {
         let input = r"# xmcd
 #
