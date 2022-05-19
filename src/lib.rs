@@ -9,7 +9,6 @@ use std::{
 
 use discid::DiscId;
 
-
 #[derive(Default, Debug, Clone)]
 pub struct Match {
     pub discid: String,
@@ -36,7 +35,6 @@ pub struct Track {
     pub composer: Option<String>,
 }
 
-
 #[derive(Debug)]
 pub struct Connection {
     stream: TcpStream,
@@ -51,7 +49,7 @@ impl Connection {
 
     /// create a new connection to gnudb.gnudb.org port 8880
     pub fn new() -> Result<Connection, String> {
-       connect("gnudb.gnudb.org:8880".to_owned())
+        connect("gnudb.gnudb.org:8880".to_owned())
     }
 
     /// query gnudb for a given discid
@@ -79,13 +77,11 @@ impl Connection {
             toc,
             discid.sectors() / 75
         );
-        let disc = cddb_query(&mut self.stream, query, discid);
-
-        return disc;
+        cddb_query(&mut self.stream, query, discid)
     }
 
     /// read all data of a given disc
-    pub fn read(&mut self, single_match : &Match) -> Result<Disc, String> {
+    pub fn read(&mut self, single_match: &Match) -> Result<Disc, String> {
         cddb_read(&mut self.stream, single_match)
     }
 
@@ -105,14 +101,12 @@ fn connect(s: String) -> Result<Connection, String> {
         let mut reader = BufReader::new(stream.try_clone().unwrap());
         reader.read_line(&mut hello).unwrap();
         let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
-        send_command(&mut stream, hello).unwrap_or_else(|_| {return "failed to send login command".to_owned()});
+        send_command(&mut stream, hello)?;
 
         // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
         let proto = "proto 6\n".to_owned();
-        send_command(&mut stream, proto).unwrap_or_else(|_| {return "failed to switch to protocol 6".to_owned()});
-        return Ok(Connection {
-            stream: stream,
-        });
+        send_command(&mut stream, proto)?;
+        return Ok(Connection { stream: stream });
     }
     Err(stream.err().unwrap().to_string())
 }
@@ -126,53 +120,48 @@ impl Drop for Connection {
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
 fn cddb_query(stream: &mut TcpStream, cmd: String, discid: &DiscId) -> Result<Vec<Match>, String> {
-    let response = send_command(stream, cmd);
-    if response.is_ok() {
-        let mut matches : Vec<Match> = Vec::new();
-        let response = response.unwrap();
-        for ref line in response.lines() {
-            if line.starts_with("200") {
-                // exact match
-                let mut split = line.splitn(4, " ");
-                let _code = split.next();
-                let category = split.next().unwrap();
-                let discid = split.next().unwrap();
-                let remainder = split.next().unwrap();
-                let mut split = remainder.split("/");
-                let title = split.next().unwrap().trim();
-                let artist = split.next().unwrap().trim();
-                let m = Match {
-                    discid: discid.to_owned(),
-                    category:category.to_owned(),
-                    title: title.to_owned(),
-                    artist: artist.to_owned(),
-                };
-                matches.push(m);
-                break;
-            }
-            if line.starts_with("211") {
-                continue; // ignore first status line
-            }
-            let m = parse_matches(line, discid.freedb_id());
+    let response = send_command(stream, cmd)?;
+    let mut matches: Vec<Match> = Vec::new();
+    for ref line in response.lines() {
+        if line.starts_with("200") {
+            // exact match
+            let mut split = line.splitn(4, " ");
+            let _code = split.next();
+            let category = split.next().unwrap();
+            let discid = split.next().unwrap();
+            let remainder = split.next().unwrap();
+            let mut split = remainder.split("/");
+            let title = split.next().unwrap().trim();
+            let artist = split.next().unwrap().trim();
+            let m = Match {
+                discid: discid.to_owned(),
+                category: category.to_owned(),
+                title: title.to_owned(),
+                artist: artist.to_owned(),
+            };
             matches.push(m);
+            break;
         }
-        return Ok(matches);
-    } else {
-        return Err(response.err().unwrap());
+        if line.starts_with("211") {
+            continue; // ignore first status line
+        }
+        let m = parse_matches(line, discid.freedb_id());
+        matches.push(m);
     }
+    return Ok(matches);
 }
 
 /// specific command to read the disc
 /// read protocol: cddb read category discid
 fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, String> {
-    let cmd = format!("cddb read {} {}\n", single_match.category, single_match.discid);
-    if let Ok(data) = send_command(stream, cmd) {
-        let disc = parse_data(data);
-        println!("disc:{:?}", disc);
-        return Ok(disc);
-    } else {
-        return Err("failed to read disc".to_owned());
-    }
+    let cmd = format!(
+        "cddb read {} {}\n",
+        single_match.category, single_match.discid
+    );
+    let data = send_command(stream, cmd)?;
+    let disc = parse_data(data);
+    println!("disc:{:?}", disc);
+    return Ok(disc);
 }
 
 /// send a CDDBP command, and parse its output, according to the protocol specs:
@@ -249,7 +238,7 @@ fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
 }
 
 /// parse a line of inexact matches
-fn parse_matches(line: &str, discid : String) -> Match {
+fn parse_matches(line: &str, discid: String) -> Match {
     let mut split = line.splitn(3, " ");
     let _ = split.next();
     let category = split.next().unwrap();
@@ -259,7 +248,7 @@ fn parse_matches(line: &str, discid : String) -> Match {
     let artist = split.next().unwrap().trim();
     Match {
         discid: discid.to_owned(),
-        category:category.to_owned(),
+        category: category.to_owned(),
         title: title.to_owned(),
         artist: artist.to_owned(),
     }
@@ -320,7 +309,7 @@ fn parse_data(data: String) -> Disc {
 mod test {
     use discid::DiscId;
 
-    use crate::{Connection};
+    use crate::Connection;
 
     #[test]
     fn test_search() {
