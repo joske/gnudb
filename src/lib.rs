@@ -307,7 +307,7 @@ mod test {
     #[test]
     fn test_good_url() {
         let con = Connection::from_host_port("gnudb.gnudb.org", 8880);
-        assert!(con.is_err());
+        assert!(con.is_ok());
     }
 
     #[test]
@@ -335,6 +335,8 @@ mod test {
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
+        assert_eq!(disc.artist, "DIRE STRAITS");
+        assert_eq!(disc.year, Some(1978 as u16));
     }
 
     #[test]
@@ -370,6 +372,8 @@ mod test {
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
+        assert_eq!(disc.artist, "Dire Straits");
+        assert_eq!(disc.year, Some(1978 as u16));
     }
 
     #[test]
@@ -429,6 +433,7 @@ PLAYORDER="
         assert_eq!(disc.title, "(black) Mutter");
         assert_eq!(disc.tracks.len(), 11);
         assert_eq!(disc.genre.unwrap(), "Industrial Metal");
+        assert_eq!(disc.year, Some(2002 as u16));
     }
 
     #[test]
@@ -482,5 +487,7 @@ PLAYORDER="
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.title, "Dire Straits");
+        assert_eq!(disc.artist, "DIRE STRAITS");
+        assert_eq!(disc.year, Some(1978 as u16));
     }
 }
