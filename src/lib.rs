@@ -87,10 +87,10 @@ impl Connection {
 
 /// connect the tcp stream, login and set the protocol to 6
 fn connect(s: String) -> Result<Connection, String> {
-    let stream = TcpStream::connect(s);
+    let stream = TcpStream::connect(s.clone());
     if stream.is_ok() {
         let mut stream = stream.unwrap();
-        println!("Successfully connected to server in port 8880");
+        println!("Successfully connected to server {}", s.clone());
         // say hello -> this is the login
         let mut hello = String::new();
         let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -114,6 +114,7 @@ impl Drop for Connection {
 
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
+/// if nothing found, will return empty matches
 fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
     let response = send_command(stream, cmd)?;
     let mut matches: Vec<Match> = Vec::new();
@@ -135,6 +136,10 @@ fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String>
                 artist: artist.to_owned(),
             };
             matches.push(m);
+            break;
+        }
+        if line.starts_with("202") {
+            // no matches
             break;
         }
         if line.starts_with("211") {
@@ -300,6 +305,18 @@ mod test {
     use crate::Connection;
 
     #[test]
+    fn test_good_url() {
+        let con = Connection::from_host_port("gnudb.gnudb.org", 8880);
+        assert!(con.is_err());
+    }
+
+    #[test]
+    fn test_bad_url() {
+        let con = Connection::from_host_port("localhost", 80);
+        assert!(con.is_err());
+    }
+
+    #[test]
     fn test_search() {
         let offsets = [
             185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
@@ -318,6 +335,20 @@ mod test {
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
+    }
+
+    #[test]
+    fn test_search_bad_discid() {
+        let offsets = [
+            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        ];
+        let discid = DiscId::put(1, &offsets).unwrap();
+        println!("freedb {}", discid.freedb_id());
+        let mut con = Connection::new().unwrap();
+        let matches = con.query(&discid);
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        assert_eq!(matches.len(), 0);
     }
 
     #[test]
