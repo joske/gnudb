@@ -11,3 +11,7 @@ keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
 discid = "0.4"
+async-std = "1.11"
+
+[dev-dependencies]
+tokio-test = "*"

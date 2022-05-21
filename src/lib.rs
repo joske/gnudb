@@ -1,11 +1,16 @@
 //! Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)
 //!
 //! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
+//! All I/O is now done async
 
 use std::{
-    io::{BufRead, BufReader, Write},
-    net::{Shutdown, TcpStream},
+    net::Shutdown,
 };
+use async_std::{
+    net::TcpStream,
+    io::{BufReader, prelude::BufReadExt, WriteExt},
+};
+// use futures_io::if_std::AsyncWrite;
 
 use discid::DiscId;
 
@@ -42,19 +47,19 @@ pub struct Connection {
 
 impl Connection {
     /// create a new connection to given host:port combination
-    pub fn from_host_port(host: &str, port: u16) -> Result<Connection, String> {
+    pub async fn from_host_port(host: &str, port: u16) -> Result<Connection, String> {
         let s = format!("{}:{}", host, port);
-        connect(s)
+        connect(s).await
     }
 
     /// create a new connection to gnudb.gnudb.org port 8880
-    pub fn new() -> Result<Connection, String> {
-        connect("gnudb.gnudb.org:8880".to_owned())
+    pub async fn new() -> Result<Connection, String> {
+        connect("gnudb.gnudb.org:8880".to_owned()).await
     }
 
     /// query gnudb for a given discid
     /// returns a vector of matches or an error
-    pub fn query(&mut self, discid: &DiscId) -> Result<Vec<Match>, String> {
+    pub async fn query(&mut self, discid: &DiscId) -> Result<Vec<Match>, String> {
         // the protocol is as follows:
         // cddb query discid ntrks off1 off2 ... nsecs
 
@@ -72,12 +77,12 @@ impl Connection {
             toc,
             discid.sectors() / 75
         );
-        cddb_query(&mut self.stream, query)
+        cddb_query(&mut self.stream, query).await
     }
 
     /// read all data of a given disc
-    pub fn read(&mut self, single_match: &Match) -> Result<Disc, String> {
-        cddb_read(&mut self.stream, single_match)
+    pub async fn read(&mut self, single_match: &Match) -> Result<Disc, String> {
+        cddb_read(&mut self.stream, single_match).await
     }
 
     pub fn close(&mut self) {
@@ -86,21 +91,21 @@ impl Connection {
 }
 
 /// connect the tcp stream, login and set the protocol to 6
-fn connect(s: String) -> Result<Connection, String> {
-    let stream = TcpStream::connect(s.clone());
+async fn connect(s: String) -> Result<Connection, String> {
+    let stream = TcpStream::connect(s.clone()).await;
     if stream.is_ok() {
         let mut stream = stream.unwrap();
         println!("Successfully connected to server {}", s.clone());
         // say hello -> this is the login
         let mut hello = String::new();
-        let mut reader = BufReader::new(stream.try_clone().unwrap());
-        reader.read_line(&mut hello).unwrap();
+        let mut reader = BufReader::new(stream.clone());
+        reader.read_line(&mut hello).await.unwrap();
         let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
-        send_command(&mut stream, hello)?;
+        send_command(&mut stream, hello).await?;
 
         // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
         let proto = "proto 6\n".to_owned();
-        send_command(&mut stream, proto)?;
+        send_command(&mut stream, proto).await?;
         return Ok(Connection { stream: stream });
     }
     Err(stream.err().unwrap().to_string())
@@ -115,8 +120,8 @@ impl Drop for Connection {
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
 /// if nothing found, will return empty matches
-fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
-    let response = send_command(stream, cmd)?;
+async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
+    let response = send_command(stream, cmd).await?;
     let mut matches: Vec<Match> = Vec::new();
     for ref line in response.lines() {
         if line.starts_with("200") {
@@ -153,12 +158,12 @@ fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String>
 
 /// specific command to read the disc
 /// read protocol: cddb read category discid
-fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, String> {
+async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, String> {
     let cmd = format!(
         "cddb read {} {}\n",
         single_match.category, single_match.discid
     );
-    let data = send_command(stream, cmd)?;
+    let data = send_command(stream, cmd).await?;
     let disc = parse_data(data);
     println!("disc:{:?}", disc);
     return Ok(disc);
@@ -182,13 +187,13 @@ fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, Strin
 ///
 /// Third digit:
 /// xx[0-9]	Command-specific code
-fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
+async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
     let msg = cmd.as_bytes();
-    stream.write(msg).unwrap();
+    stream.write(&msg).await.unwrap();
     println!("sent {}", cmd);
     let mut response = String::new();
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-    match reader.read_line(&mut response) {
+    let mut reader = BufReader::new(stream.clone());
+    match reader.read_line(&mut response).await {
         Ok(_) => {
             print!("response: {}", response);
             if response.starts_with("5") {
@@ -206,7 +211,7 @@ fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
                     let mut data = String::new();
                     let mut response = String::new();
                     loop {
-                        let result = reader.read_line(&mut response);
+                        let result = reader.read_line(&mut response).await;
                         print!("response: {}", response);
                         match result {
                             Ok(_) => {
@@ -304,15 +309,21 @@ mod test {
 
     use crate::Connection;
 
+    macro_rules! aw {
+        ($e:expr) => {
+            tokio_test::block_on($e)
+        };
+    }
+
     #[test]
     fn test_good_url() {
-        let con = Connection::from_host_port("gnudb.gnudb.org", 8880);
+        let con = aw!(Connection::from_host_port("gnudb.gnudb.org", 8880));
         assert!(con.is_ok());
     }
 
     #[test]
     fn test_bad_url() {
-        let con = Connection::from_host_port("localhost", 80);
+        let con = aw!(Connection::from_host_port("localhost", 80));
         assert!(con.is_err());
     }
 
@@ -323,12 +334,12 @@ mod test {
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
         println!("freedb {}", discid.freedb_id());
-        let mut con = Connection::new().unwrap();
-        let matches = con.query(&discid);
+        let mut con = aw!(Connection::new()).unwrap();
+        let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
         let matches = matches.unwrap();
         assert_eq!(matches.len(), 1);
-        let disc = con.read(&matches[0]);
+        let disc = aw!(con.read(&matches[0]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978 as u16);
@@ -341,13 +352,11 @@ mod test {
 
     #[test]
     fn test_search_bad_discid() {
-        let offsets = [
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-        ];
+        let offsets = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
         let discid = DiscId::put(1, &offsets).unwrap();
         println!("freedb {}", discid.freedb_id());
-        let mut con = Connection::new().unwrap();
-        let matches = con.query(&discid);
+        let mut con = aw!(Connection::new()).unwrap();
+        let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
         let matches = matches.unwrap();
         assert_eq!(matches.len(), 0);
@@ -360,12 +369,12 @@ mod test {
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
         println!("freedb {}", discid.freedb_id());
-        let mut con = Connection::new().unwrap();
-        let matches = con.query(&discid);
+        let mut con = aw!(Connection::new()).unwrap();
+        let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
         let matches = matches.unwrap();
         assert_eq!(matches.len(), 13);
-        let disc = con.read(&matches[2]);
+        let disc = aw!(con.read(&matches[2]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978 as u16);
