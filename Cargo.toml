@@ -1,6 +1,6 @@
 [package]
 name = "gnudb"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
@@ -14,4 +14,4 @@ discid = "0.4"
 async-std = "1.11"
 
 [dev-dependencies]
-tokio-test = "*"
+tokio-test = "0.4"
