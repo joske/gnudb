@@ -8,7 +8,6 @@ use async_std::{
     net::TcpStream,
 };
 use std::net::Shutdown;
-// use futures_io::if_std::AsyncWrite;
 
 use discid::DiscId;
 
