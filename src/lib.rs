@@ -103,7 +103,7 @@ async fn connect(s: String) -> Result<Connection, String> {
         // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
         let proto = "proto 6\n".to_owned();
         send_command(&mut stream, proto).await?;
-        return Ok(Connection { stream: stream });
+        return Ok(Connection { stream });
     }
     Err(stream.err().unwrap().to_string())
 }
