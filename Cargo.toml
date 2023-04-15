@@ -10,8 +10,8 @@ readme = "README.md"
 keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
-discid = "0.4"
-async-std = "1.11"
+discid = "0.5"
+async-std = "1.12"
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test = "0.4.2"
