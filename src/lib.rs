@@ -65,7 +65,7 @@ impl Connection {
         let mut toc = discid.toc_string();
         // the toc from DiscId is total_sectors first_track off1 off2 ... offn
         // so we take from the 3rd item in the toc
-        let mut split = toc.splitn(4, " ");
+        let mut split = toc.splitn(4, ' ');
         toc = split.nth(3).unwrap().to_owned(); // this should be the rest of the string
         let query = format!(
             "cddb query {} {} {} {}\n",
@@ -120,15 +120,15 @@ impl Drop for Connection {
 async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
     let response = send_command(stream, cmd).await?;
     let mut matches: Vec<Match> = Vec::new();
-    for ref line in response.lines() {
+    for line in response.lines() {
         if line.starts_with("200") {
             // exact match
-            let mut split = line.splitn(4, " ");
+            let mut split = line.splitn(4, ' ');
             let _code = split.next();
             let category = split.next().unwrap();
             let discid = split.next().unwrap();
             let remainder = split.next().unwrap();
-            let mut split = remainder.split("/");
+            let mut split = remainder.split('/');
             let title = split.next().unwrap().trim();
             let artist = split.next().unwrap().trim();
             let m = Match {
@@ -150,7 +150,7 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, S
         let m = parse_matches(line);
         matches.push(m);
     }
-    return Ok(matches);
+    Ok(matches)
 }
 
 /// specific command to read the disc
@@ -163,37 +163,37 @@ async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc,
     let data = send_command(stream, cmd).await?;
     let disc = parse_data(data);
     println!("disc:{:?}", disc);
-    return Ok(disc);
+    Ok(disc)
 }
 
 /// send a CDDBP command, and parse its output, according to the protocol specs:
 /// Server response code (three digit code):
 ///
 /// First digit:
-/// 1xx	Informative message
-/// 2xx	Command OK
-/// 3xx	Command OK so far, continue
-/// 4xx	Command OK, but cannot be performed for some specified reasons
-/// 5xx	Command unimplemented, incorrect, or program error
+/// 1xx    Informative message
+/// 2xx    Command OK
+/// 3xx    Command OK so far, continue
+/// 4xx    Command OK, but cannot be performed for some specified reasons
+/// 5xx    Command unimplemented, incorrect, or program error
 ///
 /// Second digit:
-/// x0x	Ready for further commands
-/// x1x	More server-to-client output follows (until terminating marker)
-/// x2x	More client-to-server input follows (until terminating marker)
-/// x3x	Connection will close
+/// x0x    Ready for further commands
+/// x1x    More server-to-client output follows (until terminating marker)
+/// x2x    More client-to-server input follows (until terminating marker)
+/// x3x    Connection will close
 ///
 /// Third digit:
-/// xx[0-9]	Command-specific code
+/// xx[0-9]    Command-specific code
 async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
     let msg = cmd.as_bytes();
-    stream.write(&msg).await.unwrap();
+    stream.write(msg).await.unwrap();
     println!("sent {}", cmd);
     let mut response = String::new();
     let mut reader = BufReader::new(stream.clone());
     match reader.read_line(&mut response).await {
         Ok(_) => {
             print!("response: {}", response);
-            if response.starts_with("5") {
+            if response.starts_with('5') {
                 // eek!
                 Err(response)
             } else {
@@ -212,7 +212,7 @@ async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, Str
                         print!("response: {}", response);
                         match result {
                             Ok(_) => {
-                                if response.starts_with(".") {
+                                if response.starts_with('.') {
                                     // done
                                     break;
                                 } else {
@@ -241,11 +241,11 @@ async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, Str
 
 /// parse a line of inexact matches
 fn parse_matches(line: &str) -> Match {
-    let mut split = line.splitn(3, " ");
+    let mut split = line.splitn(3, ' ');
     let category = split.next().unwrap();
     let id = split.next().unwrap();
     let remainder = split.next().unwrap();
-    let mut split = remainder.split("/");
+    let mut split = remainder.split('/');
     let title = split.next().unwrap().trim();
     let artist = split.next().unwrap().trim();
     Match {
@@ -263,19 +263,19 @@ fn parse_data(data: String) -> Disc {
         ..Default::default()
     };
     let mut i = 0;
-    for ref line in data.lines() {
+    for line in data.lines() {
         if line.starts_with("DTITLE") {
-            let value = line.split("=").nth(1).unwrap();
-            let mut split = value.split("/");
+            let value = line.split('=').nth(1).unwrap();
+            let mut split = value.split('/');
             disc.artist = split.next().unwrap().trim().to_owned();
             disc.title = split.next().unwrap().trim().to_owned();
         }
         if line.starts_with("DYEAR") {
-            let value = line.split("=").nth(1).unwrap();
+            let value = line.split('=').nth(1).unwrap();
             disc.year = Some(value.parse::<u16>().unwrap());
         }
         if line.starts_with("DGENRE") {
-            let value = line.split("=").nth(1).unwrap();
+            let value = line.split('=').nth(1).unwrap();
             disc.genre = Some(value.to_owned());
         }
         // since we use protocol level 6, we should get the year/genre via DYEAR and DGENRE, and these should come before EXTD
@@ -291,7 +291,7 @@ fn parse_data(data: String) -> Disc {
                 ..Default::default()
             };
             track.number = i + 1; // tracks are 0 based in CDDB/GNUDB
-            track.title = line.split("=").nth(1).unwrap().to_owned();
+            track.title = line.split('=').nth(1).unwrap().to_owned();
             track.artist = disc.artist.clone();
             disc.tracks.push(track);
             i += 1; // assume tracks are consecutive - this is not necessarily true
@@ -308,9 +308,9 @@ async fn _example() {
     // find a list of matches (could be multiple)
     let matches: Vec<Match> = con.query(&discid).await.unwrap();
     // select the right match
-    let ref m: Match = matches[2];
+    let m: &Match = &matches[2];
     // read all the metadata
-    let _disc = con.read(&m).await.unwrap();
+    let _disc = con.read(m).await.unwrap();
     // close the connection (Drop trait is implemented, so not strictly necessary)
     con.close();
 }
@@ -354,12 +354,12 @@ mod test {
         let disc = aw!(con.read(&matches[0]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
-        assert_eq!(disc.year.unwrap(), 1978 as u16);
+        assert_eq!(disc.year.unwrap(), 1978);
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
         assert_eq!(disc.artist, "DIRE STRAITS");
-        assert_eq!(disc.year, Some(1978 as u16));
+        assert_eq!(disc.year, Some(1978));
     }
 
     #[test]
@@ -389,12 +389,12 @@ mod test {
         let disc = aw!(con.read(&matches[2]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
-        assert_eq!(disc.year.unwrap(), 1978 as u16);
+        assert_eq!(disc.year.unwrap(), 1978);
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
         assert_eq!(disc.artist, "Dire Straits");
-        assert_eq!(disc.year, Some(1978 as u16));
+        assert_eq!(disc.year, Some(1978));
     }
 
     #[test]
@@ -402,17 +402,17 @@ mod test {
         let input = r"# xmcd
 #
 # Track frame offsets:
-#	150
-#	25075
-#	46501
-#	70596
-#	88533
-#	105910
-#	125169
-#	147365
-#	162906
-#	190441
-#	215174
+#    150
+#    25075
+#    46501
+#    70596
+#    88533
+#    105910
+#    125169
+#    147365
+#    162906
+#    190441
+#    215174
 #
 # Disc length: 3186 seconds
 #
@@ -450,11 +450,11 @@ EXTT10=
 PLAYORDER="
             .to_owned();
         let disc = super::parse_data(input);
-        assert_eq!(disc.year.unwrap(), 2002 as u16);
+        assert_eq!(disc.year.unwrap(), 2002);
         assert_eq!(disc.title, "(black) Mutter");
         assert_eq!(disc.tracks.len(), 11);
         assert_eq!(disc.genre.unwrap(), "Industrial Metal");
-        assert_eq!(disc.year, Some(2002 as u16));
+        assert_eq!(disc.year, Some(2002));
     }
 
     #[test]
@@ -462,15 +462,15 @@ PLAYORDER="
         let input = r"# xmcd
 #
 # Track frame offsets:
-#	150
-#	18051
-#	42248
-#	57183
-#	75952
-#	89333
-#	114384
-#	142453
-#	163641
+#    150
+#    18051
+#    42248
+#    57183
+#    75952
+#    89333
+#    114384
+#    142453
+#    163641
 #
 # Disc length: 2476 seconds
 #
@@ -504,11 +504,11 @@ EXTT8=
 PLAYORDER="
             .to_owned();
         let disc = super::parse_data(input);
-        assert_eq!(disc.year.unwrap(), 1978 as u16);
+        assert_eq!(disc.year.unwrap(), 1978);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.title, "Dire Straits");
         assert_eq!(disc.artist, "DIRE STRAITS");
-        assert_eq!(disc.year, Some(1978 as u16));
+        assert_eq!(disc.year, Some(1978));
     }
 }
