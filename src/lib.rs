@@ -315,6 +315,7 @@ async fn _example() {
     con.close();
 }
 
+// run these tests with `--test-threads=1` or you'll get hangs because gnudb doesn't like multiple connections from same IP
 #[cfg(test)]
 mod test {
     use discid::DiscId;
@@ -385,7 +386,7 @@ mod test {
         let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
         let matches = matches.unwrap();
-        assert_eq!(matches.len(), 13);
+        assert_eq!(matches.len(), 14);
         let disc = aw!(con.read(&matches[2]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
