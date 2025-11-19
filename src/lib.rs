@@ -4,7 +4,7 @@
 //! All I/O is now done async
 
 use async_std::{
-    io::{prelude::BufReadExt, BufReader, WriteExt},
+    io::{BufReader, WriteExt, prelude::BufReadExt},
     net::TcpStream,
 };
 use std::net::Shutdown;
@@ -90,8 +90,7 @@ impl Connection {
 /// connect the tcp stream, login and set the protocol to 6
 async fn connect(s: String) -> Result<Connection, String> {
     let stream = TcpStream::connect(s.clone()).await;
-    if stream.is_ok() {
-        let mut stream = stream.unwrap();
+    if let Ok(mut stream) = stream {
         println!("Successfully connected to server {}", s.clone());
         // say hello -> this is the login
         let mut hello = String::new();

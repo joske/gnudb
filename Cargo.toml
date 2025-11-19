@@ -1,17 +1,17 @@
 [package]
 name = "gnudb"
 version = "0.2.2"
-edition = "2021"
-license = "MIT"
+edition = "2024"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
+readme = "README.md"
 homepage = "https://github.com/joske/gnudb"
 repository = "https://github.com/joske/gnudb"
-readme = "README.md"
+license = "MIT"
 keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
+async-std = "1.13"
 discid = "0.5"
-async-std = "1.12"
 
 [dev-dependencies]
-tokio-test = "0.4.2"
+tokio-test = "0.4"
