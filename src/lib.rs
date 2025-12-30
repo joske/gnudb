@@ -3,10 +3,14 @@
 //! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
 //! All I/O is now done async
 
+use log::debug;
 use smol::{io::BufReader, net::TcpStream, prelude::*};
 use std::net::Shutdown;
 
 use discid::DiscId;
+use error::GnuDbError;
+
+pub mod error;
 
 #[derive(Default, Debug, Clone)]
 pub struct Match {
@@ -41,19 +45,19 @@ pub struct Connection {
 
 impl Connection {
     /// create a new connection to given host:port combination
-    pub async fn from_host_port(host: &str, port: u16) -> Result<Connection, String> {
+    pub async fn from_host_port(host: &str, port: u16) -> Result<Connection, GnuDbError> {
         let s = format!("{}:{}", host, port);
         connect(s).await
     }
 
     /// create a new connection to gnudb.gnudb.org port 8880
-    pub async fn new() -> Result<Connection, String> {
+    pub async fn new() -> Result<Connection, GnuDbError> {
         connect("gnudb.gnudb.org:8880".to_owned()).await
     }
 
     /// query gnudb for a given discid
     /// returns a vector of matches or an error
-    pub async fn query(&mut self, discid: &DiscId) -> Result<Vec<Match>, String> {
+    pub async fn query(&mut self, discid: &DiscId) -> Result<Vec<Match>, GnuDbError> {
         // the protocol is as follows:
         // cddb query discid ntrks off1 off2 ... nsecs
 
@@ -63,7 +67,10 @@ impl Connection {
         // the toc from DiscId is total_sectors first_track off1 off2 ... offn
         // so we take from the 3rd item in the toc
         let mut split = toc.splitn(4, ' ');
-        toc = split.nth(3).unwrap().to_owned(); // this should be the rest of the string
+        toc = split
+            .nth(3)
+            .ok_or(GnuDbError::ProtocolError("failed to parse toc".to_string()))?
+            .to_owned(); // this should be the rest of the string
         let query = format!(
             "cddb query {} {} {} {}\n",
             discid.freedb_id(),
@@ -75,33 +82,30 @@ impl Connection {
     }
 
     /// read all data of a given disc
-    pub async fn read(&mut self, single_match: &Match) -> Result<Disc, String> {
+    pub async fn read(&mut self, single_match: &Match) -> Result<Disc, GnuDbError> {
         cddb_read(&mut self.stream, single_match).await
     }
 
     pub fn close(&mut self) {
-        self.stream.shutdown(Shutdown::Both).unwrap();
+        self.stream.shutdown(Shutdown::Both).ok();
     }
 }
 
 /// connect the tcp stream, login and set the protocol to 6
-async fn connect(s: String) -> Result<Connection, String> {
-    let stream = TcpStream::connect(s.clone()).await;
-    if let Ok(mut stream) = stream {
-        println!("Successfully connected to server {}", s.clone());
-        // say hello -> this is the login
-        let mut hello = String::new();
-        let mut reader = BufReader::new(stream.clone());
-        reader.read_line(&mut hello).await.unwrap();
-        let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
-        send_command(&mut stream, hello).await?;
+async fn connect(s: String) -> Result<Connection, GnuDbError> {
+    let mut stream = TcpStream::connect(s.clone()).await?;
+    debug!("Successfully connected to server {}", s.clone());
+    // say hello -> this is the login
+    let mut hello = String::new();
+    let mut reader = BufReader::new(stream.clone());
+    reader.read_line(&mut hello).await?;
+    let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
+    send_command(&mut stream, hello).await?;
 
-        // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
-        let proto = "proto 6\n".to_owned();
-        send_command(&mut stream, proto).await?;
-        return Ok(Connection { stream });
-    }
-    Err(stream.err().unwrap().to_string())
+    // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
+    let proto = "proto 6\n".to_owned();
+    send_command(&mut stream, proto).await?;
+    Ok(Connection { stream })
 }
 
 impl Drop for Connection {
@@ -113,7 +117,7 @@ impl Drop for Connection {
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
 /// if nothing found, will return empty matches
-async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, String> {
+async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, GnuDbError> {
     let response = send_command(stream, cmd).await?;
     let mut matches: Vec<Match> = Vec::new();
     for line in response.lines() {
@@ -121,12 +125,26 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, S
             // exact match
             let mut split = line.splitn(4, ' ');
             let _code = split.next();
-            let category = split.next().unwrap();
-            let discid = split.next().unwrap();
-            let remainder = split.next().unwrap();
+            let category = split.next().ok_or(GnuDbError::ProtocolError(
+                "failed to parse exact match category".to_owned(),
+            ))?;
+            let discid = split.next().ok_or(GnuDbError::ProtocolError(
+                "failed to parse exact match discid".to_owned(),
+            ))?;
+            let remainder = split.next().ok_or(GnuDbError::ProtocolError(
+                "failed to parse exact match remainder".to_owned(),
+            ))?;
             let mut split = remainder.split('/');
-            let title = split.next().unwrap().trim();
-            let artist = split.next().unwrap().trim();
+            let title = split
+                .next()
+                .ok_or(GnuDbError::ProtocolError("failed to get title".to_string()))?
+                .trim();
+            let artist = split
+                .next()
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to get artist".to_string(),
+                ))?
+                .trim();
             let m = Match {
                 discid: discid.to_owned(),
                 category: category.to_owned(),
@@ -143,7 +161,7 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, S
         if line.starts_with("211") {
             continue; // ignore first status line
         }
-        let m = parse_matches(line);
+        let m = parse_matches(line)?;
         matches.push(m);
     }
     Ok(matches)
@@ -151,14 +169,14 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, S
 
 /// specific command to read the disc
 /// read protocol: cddb read category discid
-async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, String> {
+async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, GnuDbError> {
     let cmd = format!(
         "cddb read {} {}\n",
         single_match.category, single_match.discid
     );
     let data = send_command(stream, cmd).await?;
-    let disc = parse_data(data);
-    println!("disc:{:?}", disc);
+    let disc = parse_data(data)?;
+    debug!("disc:{:?}", disc);
     Ok(disc)
 }
 
@@ -180,32 +198,39 @@ async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc,
 ///
 /// Third digit:
 /// xx[0-9]    Command-specific code
-async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, String> {
+async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, GnuDbError> {
     let msg = cmd.as_bytes();
-    stream.write(msg).await.unwrap();
-    println!("sent {}", cmd);
+    stream.write(msg).await?;
+    debug!("sent {}", cmd);
     let mut response = String::new();
     let mut reader = BufReader::new(stream.clone());
     match reader.read_line(&mut response).await {
         Ok(_) => {
-            print!("response: {}", response);
+            debug!("response: {}", response);
             if response.starts_with('5') {
                 // eek!
-                Err(response)
+                Err(GnuDbError::ProtocolError(response))
             } else {
                 // ok, check second digit
-                if response.chars().nth(1).unwrap() == '0' {
+                if response.chars().nth(1).ok_or(GnuDbError::ProtocolError(
+                    "failed to parse response code".to_string(),
+                ))? == '0'
+                {
                     // no more lines
                     Ok(response)
-                } else if response.chars().nth(1).unwrap() == '1'
-                    || response.chars().nth(1).unwrap() == '2'
+                } else if response.chars().nth(1).ok_or(GnuDbError::ProtocolError(
+                    "failed to parse response code".to_string(),
+                ))? == '1'
+                    || response.chars().nth(1).ok_or(GnuDbError::ProtocolError(
+                        "failed to parse response code".to_string(),
+                    ))? == '2'
                 {
                     // more lines to read
                     let mut data = String::new();
                     let mut response = String::new();
                     loop {
                         let result = reader.read_line(&mut response).await;
-                        print!("response: {}", response);
+                        debug!("response: {}", response);
                         match result {
                             Ok(_) => {
                                 if response.starts_with('.') {
@@ -217,83 +242,149 @@ async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, Str
                                 }
                             }
                             Err(e) => {
-                                println!("Failed to receive data: {}", e);
-                                return Err("failed to read".to_owned());
+                                debug!("Failed to receive data: {}", e);
+                                return Err(GnuDbError::ProtocolError(format!(
+                                    "failed to read line: {}",
+                                    e
+                                )));
                             }
                         }
                     }
                     Ok(data)
                 } else {
-                    Err(response)
+                    Err(GnuDbError::ProtocolError(response))
                 }
             }
         }
         Err(e) => {
-            println!("Failed to send command: {}", e);
-            Err(e.to_string())
+            debug!("Failed to send command: {}", e);
+            Err(GnuDbError::ProtocolError(e.to_string()))
         }
     }
 }
 
 /// parse a line of inexact matches
-fn parse_matches(line: &str) -> Match {
+fn parse_matches(line: &str) -> Result<Match, GnuDbError> {
     let mut split = line.splitn(3, ' ');
-    let category = split.next().unwrap();
-    let id = split.next().unwrap();
-    let remainder = split.next().unwrap();
+    let category = split.next().ok_or(GnuDbError::ProtocolError(
+        "failed to parse category".to_owned(),
+    ))?;
+    let id = split
+        .next()
+        .ok_or(GnuDbError::ProtocolError("failed to parse id".to_owned()))?;
+    let remainder = split.next().ok_or(GnuDbError::ProtocolError(
+        "failed to parse remainder".to_owned(),
+    ))?;
     let mut split = remainder.split('/');
-    let title = split.next().unwrap().trim();
-    let artist = split.next().unwrap().trim();
-    Match {
+    let title = split
+        .next()
+        .ok_or(GnuDbError::ProtocolError(
+            "failed to parse title".to_string(),
+        ))?
+        .trim();
+    let artist = split
+        .next()
+        .ok_or(GnuDbError::ProtocolError(
+            "failed to parse artist".to_string(),
+        ))?
+        .trim();
+    Ok(Match {
         discid: id.to_owned(),
         category: category.to_owned(),
         title: title.to_owned(),
         artist: artist.to_owned(),
-    }
+    })
 }
 
 /// parse the full response from the CDDB server
-fn parse_data(data: String) -> Disc {
-    println!("{}", data);
+fn parse_data(data: String) -> Result<Disc, GnuDbError> {
+    debug!("{}", data);
     let mut disc = Disc {
         ..Default::default()
     };
-    let mut i = 0;
     for line in data.lines() {
         if line.starts_with("DTITLE") {
-            let value = line.split('=').nth(1).unwrap();
-            let mut split = value.split('/');
-            disc.artist = split.next().unwrap().trim().to_owned();
-            disc.title = split.next().unwrap().trim().to_owned();
+            let value = line
+                .strip_prefix("DTITLE=")
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse DTITLE".to_owned(),
+                ))?;
+            let mut split = value.splitn(2, '/');
+            disc.artist = split
+                .next()
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse DTITLE artist".to_owned(),
+                ))?
+                .trim()
+                .to_owned();
+            disc.title = split
+                .next()
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse DTITLE title".to_owned(),
+                ))?
+                .trim()
+                .to_owned();
         }
         if line.starts_with("DYEAR") {
-            let value = line.split('=').nth(1).unwrap();
-            disc.year = Some(value.parse::<u16>().unwrap());
+            let value = line
+                .strip_prefix("DYEAR=")
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse DYEAR".to_owned(),
+                ))?
+                .trim();
+            disc.year =
+                Some(value.parse::<u16>().map_err(|e| {
+                    GnuDbError::ProtocolError(format!("failed to parse DYEAR: {}", e))
+                })?);
         }
         if line.starts_with("DGENRE") {
-            let value = line.split('=').nth(1).unwrap();
+            let value = line
+                .strip_prefix("DGENRE=")
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse DGENRE".to_owned(),
+                ))?
+                .trim();
             disc.genre = Some(value.to_owned());
         }
         // since we use protocol level 6, we should get the year/genre via DYEAR and DGENRE, and these should come before EXTD
         // this is as a fallback
-        if disc.year.is_none() && line.starts_with("EXTD") {
-            let mut split = line.splitn(2, "YEAR:");
-            let y = split.nth(1).unwrap();
-            split = y.splitn(2, " ");
-            disc.year = Some(split.next().unwrap().parse::<u16>().unwrap());
+        if disc.year.is_none()
+            && line.starts_with("EXTD")
+            && let Some(pos) = line.find("YEAR:")
+        {
+            let value = line[(pos + "YEAR:".len())..]
+                .split_whitespace()
+                .next()
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse EXTD YEAR".to_owned(),
+                ))?;
+            disc.year = Some(value.parse::<u16>().map_err(|e| {
+                GnuDbError::ProtocolError(format!("failed to parse EXTD YEAR: {}", e))
+            })?);
         }
+
         if line.starts_with("TTITLE") {
+            let rest = line
+                .strip_prefix("TTITLE")
+                .ok_or(GnuDbError::ProtocolError(
+                    "failed to parse TTITLE".to_owned(),
+                ))?;
+            let (index_str, title) = rest.split_once('=').ok_or(GnuDbError::ProtocolError(
+                "failed to parse TTITLE value".to_owned(),
+            ))?;
+            let index = index_str.trim().parse::<u32>().map_err(|e| {
+                GnuDbError::ProtocolError(format!("failed to parse TTITLE index: {}", e))
+            })?;
             let mut track = Track {
                 ..Default::default()
             };
-            track.number = i + 1; // tracks are 0 based in CDDB/GNUDB
-            track.title = line.split('=').nth(1).unwrap().to_owned();
+            track.number = index + 1; // tracks are 0 based in CDDB/GNUDB
+            track.title = title.to_owned();
             track.artist = disc.artist.clone();
             disc.tracks.push(track);
-            i += 1; // assume tracks are consecutive - this is not necessarily true
         }
     }
-    disc
+    Ok(disc)
 }
 
 async fn _example() {
@@ -315,8 +406,9 @@ async fn _example() {
 #[cfg(test)]
 mod test {
     use discid::DiscId;
+    use log::debug;
 
-    use crate::Connection;
+    use crate::{Connection, error::GnuDbError};
 
     macro_rules! aw {
         ($e:expr) => {
@@ -324,25 +416,32 @@ mod test {
         };
     }
 
+    fn init_logger() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn test_good_url() {
+        init_logger();
         let con = aw!(Connection::from_host_port("gnudb.gnudb.org", 8880));
         assert!(con.is_ok());
     }
 
     #[test]
     fn test_bad_url() {
+        init_logger();
         let con = aw!(Connection::from_host_port("localhost", 80));
         assert!(con.is_err());
     }
 
     #[test]
     fn test_search() {
+        init_logger();
         let offsets = [
             185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
-        println!("freedb {}", discid.freedb_id());
+        debug!("freedb {}", discid.freedb_id());
         let mut con = aw!(Connection::new()).unwrap();
         let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
@@ -361,9 +460,10 @@ mod test {
 
     #[test]
     fn test_search_bad_discid() {
-        let offsets = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
-        let discid = DiscId::put(1, &offsets).unwrap();
-        println!("freedb {}", discid.freedb_id());
+        init_logger();
+        let offsets = [235823, 0, 0, 0, 0];
+        let discid = DiscId::put(3, &offsets).unwrap();
+        debug!("freedb {}", discid.freedb_id());
         let mut con = aw!(Connection::new()).unwrap();
         let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
@@ -373,30 +473,54 @@ mod test {
 
     #[test]
     fn test_inexact_search() {
+        init_logger();
         let offsets = [
-            185710, 150, 18075, 42275, 57184, 75952, 89333, 114386, 142451, 163642,
+            185710, 150, 18025, 42275, 57184, 75952, 89333, 114386, 142451, 163695,
         ];
         let discid = DiscId::put(1, &offsets).unwrap();
-        println!("freedb {}", discid.freedb_id());
+        debug!("freedb {}", discid.freedb_id());
         let mut con = aw!(Connection::new()).unwrap();
         let matches = aw!(con.query(&discid));
         assert!(matches.is_ok());
         let matches = matches.unwrap();
-        assert_eq!(matches.len(), 14);
-        let disc = aw!(con.read(&matches[2]));
+        assert_eq!(matches.len(), 1);
+        let disc = aw!(con.read(&matches[0]));
         assert!(disc.is_ok());
         let disc = disc.unwrap();
         assert_eq!(disc.year.unwrap(), 1978);
         assert_eq!(disc.tracks.len(), 9);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.title, "Dire Straits");
-        assert_eq!(disc.artist, "Dire Straits");
+        assert_eq!(disc.artist, "DIRE STRAITS");
         assert_eq!(disc.year, Some(1978));
     }
 
     #[test]
-    fn test_parse() {
-        let input = r"# xmcd
+    fn test_parse() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(RAMMSTEIN.to_string())?;
+        assert_eq!(disc.year.unwrap(), 2002);
+        assert_eq!(disc.title, "(black) Mutter");
+        assert_eq!(disc.tracks.len(), 11);
+        assert_eq!(disc.genre.unwrap(), "Industrial Metal");
+        assert_eq!(disc.year, Some(2002));
+        Ok(())
+    }
+
+    #[test]
+    fn test_extd() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(DIRE_STRAITS.to_string())?;
+        assert_eq!(disc.year.unwrap(), 1978);
+        assert_eq!(disc.genre.unwrap(), "Rock");
+        assert_eq!(disc.tracks.len(), 9);
+        assert_eq!(disc.title, "Dire Straits");
+        assert_eq!(disc.artist, "DIRE STRAITS");
+        assert_eq!(disc.year, Some(1978));
+        Ok(())
+    }
+
+    const RAMMSTEIN: &str = r"# xmcd
 #
 # Track frame offsets:
 #    150
@@ -444,19 +568,9 @@ EXTT7=
 EXTT8=
 EXTT9=
 EXTT10=
-PLAYORDER="
-            .to_owned();
-        let disc = super::parse_data(input);
-        assert_eq!(disc.year.unwrap(), 2002);
-        assert_eq!(disc.title, "(black) Mutter");
-        assert_eq!(disc.tracks.len(), 11);
-        assert_eq!(disc.genre.unwrap(), "Industrial Metal");
-        assert_eq!(disc.year, Some(2002));
-    }
+PLAYORDER=";
 
-    #[test]
-    fn test_extd() {
-        let input = r"# xmcd
+    const DIRE_STRAITS: &str = r"# xmcd
 #
 # Track frame offsets:
 #    150
@@ -498,14 +612,5 @@ EXTT5=
 EXTT6=
 EXTT7=
 EXTT8=
-PLAYORDER="
-            .to_owned();
-        let disc = super::parse_data(input);
-        assert_eq!(disc.year.unwrap(), 1978);
-        assert_eq!(disc.genre.unwrap(), "Rock");
-        assert_eq!(disc.tracks.len(), 9);
-        assert_eq!(disc.title, "Dire Straits");
-        assert_eq!(disc.artist, "DIRE STRAITS");
-        assert_eq!(disc.year, Some(1978));
-    }
+PLAYORDER=";
 }
