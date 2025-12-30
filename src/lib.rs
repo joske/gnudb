@@ -529,6 +529,34 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_invalid_dyear_uses_extd() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(INVALID_DYEAR_EXTD.to_string())?;
+        assert_eq!(disc.year, Some(1999));
+        assert_eq!(disc.genre.as_deref(), Some("Alt"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_valid_dyear_overrides_extd() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(CONFLICTING_DYEAR.to_string())?;
+        assert_eq!(disc.year, Some(2001));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_matches_artist_title() -> Result<(), GnuDbError> {
+        init_logger();
+        let m = super::parse_matches("rock abc123 ARTIST / Recording Title")?;
+        assert_eq!(m.artist, "ARTIST");
+        assert_eq!(m.title, "Recording Title");
+        assert_eq!(m.category, "rock");
+        assert_eq!(m.discid, "abc123");
+        Ok(())
+    }
+
     const RAMMSTEIN: &str = r"# xmcd
 #
 # Track frame offsets:
@@ -629,5 +657,23 @@ DTITLE=Unknown Artist / Mystery Record
 DYEAR=
 DGENRE=Unknown
 TTITLE0=Track 01
+";
+
+    const INVALID_DYEAR_EXTD: &str = r"# xmcd
+#
+DTITLE=Sample Artist / Sample Title
+DYEAR=abcd
+DGENRE=Alt
+TTITLE0=Track 01
+EXTD= YEAR: 1999
+";
+
+    const CONFLICTING_DYEAR: &str = r"# xmcd
+#
+DTITLE=Artist / Title
+DYEAR=2001
+DGENRE=Rock
+TTITLE0=Song
+EXTD= YEAR: 1980
 ";
 }
