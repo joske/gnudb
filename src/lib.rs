@@ -60,9 +60,8 @@ pub struct Track {
     pub composer: Option<String>,
 }
 
-#[derive(Debug)]
 pub struct Connection {
-    stream: TcpStream,
+    reader: BufReader<TcpStream>,
 }
 
 impl Connection {
@@ -100,34 +99,34 @@ impl Connection {
             toc,
             discid.sectors() / 75
         );
-        cddb_query(&mut self.stream, query).await
+        cddb_query(&mut self.reader, query).await
     }
 
     /// read all data of a given disc
     pub async fn read(&mut self, single_match: &Match) -> Result<Disc, GnuDbError> {
-        cddb_read(&mut self.stream, single_match).await
+        cddb_read(&mut self.reader, single_match).await
     }
 
     pub fn close(&mut self) {
-        self.stream.shutdown(Shutdown::Both).ok();
+        self.reader.get_mut().shutdown(Shutdown::Both).ok();
     }
 }
 
 /// connect the tcp stream, login and set the protocol to 6
 async fn connect(s: String) -> Result<Connection, GnuDbError> {
-    let mut stream = TcpStream::connect(s.clone()).await?;
+    let stream = TcpStream::connect(s.clone()).await?;
+    let mut reader = BufReader::new(stream);
     debug!("Successfully connected to server {}", s.clone());
     // say hello -> this is the login
     let mut hello = String::new();
-    let mut reader = BufReader::new(stream.clone());
     reader.read_line(&mut hello).await?;
     let hello = "cddb hello ripperx localhost ripperx 4\n".to_owned();
-    send_command(&mut stream, hello).await?;
+    send_command(&mut reader, hello).await?;
 
     // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
     let proto = "proto 6\n".to_owned();
-    send_command(&mut stream, proto).await?;
-    Ok(Connection { stream })
+    send_command(&mut reader, proto).await?;
+    Ok(Connection { reader })
 }
 
 impl Drop for Connection {
@@ -139,8 +138,11 @@ impl Drop for Connection {
 /// specific command to query the disc, first issues a query, and then a read
 /// query protocol: cddb query discid ntrks off1 off2 ... nsecs
 /// if nothing found, will return empty matches
-async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, GnuDbError> {
-    let response = send_command(stream, cmd).await?;
+async fn cddb_query(
+    reader: &mut BufReader<TcpStream>,
+    cmd: String,
+) -> Result<Vec<Match>, GnuDbError> {
+    let response = send_command(reader, cmd).await?;
     let mut matches: Vec<Match> = Vec::new();
     for line in response.lines() {
         if line.starts_with("200") {
@@ -157,15 +159,15 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, G
                 "failed to parse exact match remainder".to_owned(),
             ))?;
             let mut split = remainder.split('/');
-            let title = split
-                .next()
-                .ok_or(GnuDbError::ProtocolError("failed to get title".to_string()))?
-                .trim();
             let artist = split
                 .next()
                 .ok_or(GnuDbError::ProtocolError(
                     "failed to get artist".to_string(),
                 ))?
+                .trim();
+            let title = split
+                .next()
+                .ok_or(GnuDbError::ProtocolError("failed to get title".to_string()))?
                 .trim();
             let m = Match {
                 discid: discid.to_owned(),
@@ -191,12 +193,15 @@ async fn cddb_query(stream: &mut TcpStream, cmd: String) -> Result<Vec<Match>, G
 
 /// specific command to read the disc
 /// read protocol: cddb read category discid
-async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc, GnuDbError> {
+async fn cddb_read(
+    reader: &mut BufReader<TcpStream>,
+    single_match: &Match,
+) -> Result<Disc, GnuDbError> {
     let cmd = format!(
         "cddb read {} {}\n",
         single_match.category, single_match.discid
     );
-    let data = send_command(stream, cmd).await?;
+    let data = send_command(reader, cmd).await?;
     let disc = parse_data(data)?;
     debug!("disc:{:?}", disc);
     Ok(disc)
@@ -220,12 +225,14 @@ async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc,
 ///
 /// Third digit:
 /// xx[0-9]    Command-specific code
-async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, GnuDbError> {
+async fn send_command(
+    reader: &mut BufReader<TcpStream>,
+    cmd: String,
+) -> Result<String, GnuDbError> {
     let msg = cmd.as_bytes();
-    stream.write_all(msg).await?;
+    reader.get_mut().write_all(msg).await?;
     debug!("sent {}", cmd);
     let mut response = String::new();
-    let mut reader = BufReader::new(stream.clone());
     match reader.read_line(&mut response).await {
         Ok(_) => {
             debug!("response: {}", response);
