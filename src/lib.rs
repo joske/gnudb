@@ -1,7 +1,7 @@
 //! Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)
 //!
 //! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
-//! All I/O is now done async
+//! All I/O is now done async using smol.
 
 use log::debug;
 use smol::{io::BufReader, net::TcpStream, prelude::*};
