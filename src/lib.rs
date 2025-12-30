@@ -200,7 +200,7 @@ async fn cddb_read(stream: &mut TcpStream, single_match: &Match) -> Result<Disc,
 /// xx[0-9]    Command-specific code
 async fn send_command(stream: &mut TcpStream, cmd: String) -> Result<String, GnuDbError> {
     let msg = cmd.as_bytes();
-    stream.write(msg).await?;
+    stream.write_all(msg).await?;
     debug!("sent {}", cmd);
     let mut response = String::new();
     let mut reader = BufReader::new(stream.clone());
@@ -276,16 +276,16 @@ fn parse_matches(line: &str) -> Result<Match, GnuDbError> {
         "failed to parse remainder".to_owned(),
     ))?;
     let mut split = remainder.split('/');
-    let title = split
-        .next()
-        .ok_or(GnuDbError::ProtocolError(
-            "failed to parse title".to_string(),
-        ))?
-        .trim();
     let artist = split
         .next()
         .ok_or(GnuDbError::ProtocolError(
             "failed to parse artist".to_string(),
+        ))?
+        .trim();
+    let title = split
+        .next()
+        .ok_or(GnuDbError::ProtocolError(
+            "failed to parse title".to_string(),
         ))?
         .trim();
     Ok(Match {
@@ -325,17 +325,16 @@ fn parse_data(data: String) -> Result<Disc, GnuDbError> {
                 .trim()
                 .to_owned();
         }
-        if line.starts_with("DYEAR") {
-            let value = line
-                .strip_prefix("DYEAR=")
-                .ok_or(GnuDbError::ProtocolError(
-                    "failed to parse DYEAR".to_owned(),
-                ))?
-                .trim();
-            disc.year =
-                Some(value.parse::<u16>().map_err(|e| {
-                    GnuDbError::ProtocolError(format!("failed to parse DYEAR: {}", e))
-                })?);
+        if let Some(value) = line.strip_prefix("DYEAR=") {
+            let value = value.trim();
+            if !value.is_empty() {
+                match value.parse::<u16>() {
+                    Ok(year) => disc.year = Some(year),
+                    Err(e) => {
+                        debug!("failed to parse DYEAR '{}': {}", value, e);
+                    }
+                }
+            }
         }
         if line.starts_with("DGENRE") {
             let value = line
@@ -520,6 +519,16 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_missing_dyear() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(NO_YEAR.to_string())?;
+        assert!(disc.year.is_none());
+        assert_eq!(disc.title, "Mystery Record");
+        assert_eq!(disc.artist, "Unknown Artist");
+        Ok(())
+    }
+
     const RAMMSTEIN: &str = r"# xmcd
 #
 # Track frame offsets:
@@ -613,4 +622,12 @@ EXTT6=
 EXTT7=
 EXTT8=
 PLAYORDER=";
+
+    const NO_YEAR: &str = r"# xmcd
+#
+DTITLE=Unknown Artist / Mystery Record
+DYEAR=
+DGENRE=Unknown
+TTITLE0=Track 01
+";
 }
