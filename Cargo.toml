@@ -1,6 +1,6 @@
 [package]
 name = "gnudb"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2024"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
 readme = "README.md"
@@ -10,7 +10,7 @@ license = "MIT"
 keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
-async-std = "1.13"
+smol = "2.0"
 discid = "0.5"
 
 [dev-dependencies]

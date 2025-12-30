@@ -3,10 +3,7 @@
 //! Right now only login, query and read are implemented, and only over CDDBP (not HTTP)
 //! All I/O is now done async
 
-use async_std::{
-    io::{BufReader, WriteExt, prelude::BufReadExt},
-    net::TcpStream,
-};
+use smol::{io::BufReader, net::TcpStream, prelude::*};
 use std::net::Shutdown;
 
 use discid::DiscId;
