@@ -571,6 +571,24 @@ mod test {
         Ok(())
     }
 
+    #[test]
+    fn test_tracks_inherit_artist_and_numbering() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = super::parse_data(TWO_TRACKS.to_string())?;
+        assert_eq!(disc.artist, "Sample Artist");
+        assert_eq!(disc.title, "Example Album");
+        assert_eq!(disc.genre, None);
+        assert_eq!(disc.year, Some(1995));
+        assert_eq!(disc.tracks.len(), 2);
+        assert_eq!(disc.tracks[0].number, 1);
+        assert_eq!(disc.tracks[0].title, "Track Zero");
+        assert_eq!(disc.tracks[0].artist, "Sample Artist");
+        assert_eq!(disc.tracks[1].number, 2);
+        assert_eq!(disc.tracks[1].title, "Track One");
+        assert_eq!(disc.tracks[1].artist, "Sample Artist");
+        Ok(())
+    }
+
     const RAMMSTEIN: &str = r"# xmcd
 #
 # Track frame offsets:
@@ -689,5 +707,14 @@ DYEAR=2001
 DGENRE=Rock
 TTITLE0=Song
 EXTD= YEAR: 1980
+";
+
+    const TWO_TRACKS: &str = r"# xmcd
+#
+DTITLE=Sample Artist / Example Album
+DYEAR=
+TTITLE0=Track Zero
+TTITLE1=Track One
+EXTD= YEAR: 1995
 ";
 }
