@@ -7,7 +7,7 @@ const HTTP_PATH: &str = "/~cddb/cddb.cgi";
 
 pub(crate) fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, GnuDbError> {
     let url = format!("http://{host}:{port}{HTTP_PATH}");
-    debug!("HTTP request URL: {}", url);
+    debug!("HTTP request URL: {url}");
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(TIMEOUT))
         .timeout_connect(Some(TIMEOUT))
@@ -25,6 +25,6 @@ pub(crate) fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, G
         .body_mut()
         .read_to_string()
         .map_err(GnuDbError::from)?;
-    debug!("HTTP response body:\n{}", body);
+    debug!("HTTP response body:\n{body}");
     Ok(body)
 }

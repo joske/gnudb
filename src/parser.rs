@@ -45,7 +45,7 @@ pub(crate) fn parse_raw_response(raw: &str) -> Result<String, GnuDbError> {
     ))?;
     if second_digit == '0' {
         if rest.is_some() {
-            return Ok(format!("{}\n", status));
+            return Ok(format!("{status}\n"));
         }
         return Ok(status.to_string());
     }
@@ -144,8 +144,8 @@ fn split_artist_title(remainder: &str) -> Result<(String, String), GnuDbError> {
 }
 
 /// parse the full response from the CDDB server
-pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
-    debug!("{}", data);
+pub(crate) fn parse_read_response(data: &str) -> Result<Disc, GnuDbError> {
+    debug!("{data}");
     let mut disc = Disc {
         ..Default::default()
     };
@@ -154,10 +154,10 @@ pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
             let mut split = value.splitn(2, '/');
             let first = split.next().unwrap_or("").trim();
             if let Some(rest) = split.next() {
-                disc.artist = first.to_owned();
-                disc.title = rest.trim().to_owned();
+                first.clone_into(&mut disc.artist);
+                rest.trim().clone_into(&mut disc.title);
             } else {
-                disc.title = first.to_owned();
+                first.clone_into(&mut disc.title);
             }
         }
         if let Some(value) = line.strip_prefix("DYEAR=") {
@@ -166,7 +166,7 @@ pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
                 match value.parse::<u16>() {
                     Ok(year) => disc.year = Some(year),
                     Err(e) => {
-                        debug!("failed to parse DYEAR '{}': {}", value, e);
+                        debug!("failed to parse DYEAR '{value}': {e}");
                     }
                 }
             }
@@ -190,7 +190,7 @@ pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
                     "failed to parse EXTD YEAR".to_owned(),
                 ))?;
             disc.year = Some(value.parse::<u16>().map_err(|e| {
-                GnuDbError::ProtocolError(format!("failed to parse EXTD YEAR: {}", e))
+                GnuDbError::ProtocolError(format!("failed to parse EXTD YEAR: {e}"))
             })?);
         }
 
@@ -204,14 +204,14 @@ pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
                 "failed to parse TTITLE value".to_owned(),
             ))?;
             let index = index_str.trim().parse::<u32>().map_err(|e| {
-                GnuDbError::ProtocolError(format!("failed to parse TTITLE index: {}", e))
+                GnuDbError::ProtocolError(format!("failed to parse TTITLE index: {e}"))
             })?;
             let mut track = Track {
                 ..Default::default()
             };
             track.number = index + 1; // tracks are 0 based in CDDB/GNUDB
-            track.title = title.to_owned();
-            track.artist = disc.artist.clone();
+            title.clone_into(&mut track.title);
+            track.artist.clone_from(&disc.artist);
             disc.tracks.push(track);
         }
     }
@@ -248,7 +248,7 @@ mod tests {
         let err = parse_raw_response(raw).unwrap_err();
         match err {
             GnuDbError::ProtocolError(_) => {}
-            _ => panic!("unexpected error type"),
+            GnuDbError::ConnectionError(_) => panic!("unexpected error type"),
         }
     }
 
@@ -258,7 +258,7 @@ mod tests {
         let err = parse_raw_response(raw).unwrap_err();
         match err {
             GnuDbError::ProtocolError(msg) => assert!(msg.contains("401")),
-            _ => panic!("unexpected error type"),
+            GnuDbError::ConnectionError(_) => panic!("unexpected error type"),
         }
     }
 
@@ -269,7 +269,7 @@ mod tests {
         let err = parse_raw_response(raw).unwrap_err();
         match err {
             GnuDbError::ProtocolError(_) => {}
-            _ => panic!("unexpected error type"),
+            GnuDbError::ConnectionError(_) => panic!("unexpected error type"),
         }
     }
 
@@ -506,7 +506,7 @@ PLAYORDER=";
     #[test]
     fn test_parse() -> Result<(), GnuDbError> {
         init_logger();
-        let disc = parse_read_response(RAMMSTEIN.to_string())?;
+        let disc = parse_read_response(RAMMSTEIN)?;
         assert_eq!(disc.year.unwrap(), 2002);
         assert_eq!(disc.title, "(black) Mutter");
         assert_eq!(disc.tracks.len(), 11);
@@ -517,7 +517,7 @@ PLAYORDER=";
     #[test]
     fn test_extd() -> Result<(), GnuDbError> {
         init_logger();
-        let disc = parse_read_response(DIRE_STRAITS.to_string())?;
+        let disc = parse_read_response(DIRE_STRAITS)?;
         assert_eq!(disc.year.unwrap(), 1978);
         assert_eq!(disc.genre.unwrap(), "Rock");
         assert_eq!(disc.tracks.len(), 9);
@@ -531,7 +531,7 @@ PLAYORDER=";
         init_logger();
         let data =
             "DTITLE=Unknown Artist / Mystery Record\nDYEAR=\nDGENRE=Unknown\nTTITLE0=Track 01\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert!(disc.year.is_none());
         assert_eq!(disc.title, "Mystery Record");
         assert_eq!(disc.artist, "Unknown Artist");
@@ -542,7 +542,7 @@ PLAYORDER=";
     fn test_invalid_dyear_uses_extd() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Sample Artist / Sample Title\nDYEAR=abcd\nDGENRE=Alt\nTTITLE0=Track 01\nEXTD= YEAR: 1999\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.year, Some(1999));
         assert_eq!(disc.genre.as_deref(), Some("Alt"));
         Ok(())
@@ -553,7 +553,7 @@ PLAYORDER=";
         init_logger();
         let data =
             "DTITLE=Artist / Title\nDYEAR=2001\nDGENRE=Rock\nTTITLE0=Song\nEXTD= YEAR: 1980\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.year, Some(2001));
         Ok(())
     }
@@ -562,7 +562,7 @@ PLAYORDER=";
     fn test_tracks_inherit_artist_and_numbering() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Sample Artist / Example Album\nDYEAR=\nTTITLE0=Track Zero\nTTITLE1=Track One\nEXTD= YEAR: 1995\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.artist, "Sample Artist");
         assert_eq!(disc.title, "Example Album");
         assert_eq!(disc.genre, None);
@@ -581,7 +581,7 @@ PLAYORDER=";
     fn test_dtitle_without_artist() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Just A Title\nDYEAR=2000\nTTITLE0=Track\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.title, "Just A Title");
         assert_eq!(disc.artist, "");
         Ok(())
@@ -591,7 +591,7 @@ PLAYORDER=";
     fn test_empty_genre() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=\nTTITLE0=Track\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert!(disc.genre.is_none());
         Ok(())
     }
@@ -600,7 +600,7 @@ PLAYORDER=";
     fn test_whitespace_only_genre() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=   \nTTITLE0=Track\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert!(disc.genre.is_none());
         Ok(())
     }
@@ -609,7 +609,7 @@ PLAYORDER=";
     fn test_disc_with_no_tracks() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=Rock\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.tracks.len(), 0);
         assert_eq!(disc.title, "Album");
         Ok(())
@@ -619,7 +619,7 @@ PLAYORDER=";
     fn test_track_with_special_characters() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Artist / Album\nTTITLE0=Track with / slash\nTTITLE1=Track (with) [brackets] & symbols!\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.tracks.len(), 2);
         assert_eq!(disc.tracks[0].title, "Track with / slash");
         assert_eq!(disc.tracks[1].title, "Track (with) [brackets] & symbols!");
@@ -631,7 +631,7 @@ PLAYORDER=";
         init_logger();
         // Year too large for u16
         let data = "DTITLE=Artist / Album\nDYEAR=99999\nTTITLE0=Track\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         // Should fail to parse and fall through without setting year
         assert!(disc.year.is_none());
         Ok(())
@@ -641,7 +641,7 @@ PLAYORDER=";
     fn test_extd_year_not_used_when_dyear_valid() -> Result<(), GnuDbError> {
         init_logger();
         let data = "DTITLE=Artist / Album\nDYEAR=2020\nTTITLE0=Track\nEXTD= YEAR: 1999\n";
-        let disc = parse_read_response(data.to_string())?;
+        let disc = parse_read_response(data)?;
         assert_eq!(disc.year, Some(2020));
         Ok(())
     }

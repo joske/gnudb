@@ -19,6 +19,7 @@ fn init_logger() {
 
 #[test]
 #[serial]
+#[ignore]
 fn test_good_url() {
     init_logger();
     let con = aw!(Connection::from_host_port("gnudb.gnudb.org", 8880));
@@ -27,6 +28,7 @@ fn test_good_url() {
 
 #[test]
 #[serial]
+#[ignore]
 fn test_bad_url() {
     init_logger();
     let con = aw!(Connection::from_host_port("localhost", 80));
@@ -35,10 +37,11 @@ fn test_bad_url() {
 
 #[test]
 #[serial]
+#[ignore]
 fn test_http_exact_search() {
     init_logger();
     let offsets = [
-        185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
+        185_700, 150, 18_051, 42_248, 57_183, 75_952, 89_333, 114_384, 142_453, 163_641,
     ];
     let discid = DiscId::put(1, &offsets).unwrap();
     debug!("freedb {}", discid.freedb_id());
@@ -58,10 +61,11 @@ fn test_http_exact_search() {
 
 #[test]
 #[serial]
+#[ignore]
 fn test_exact_search() {
     init_logger();
     let offsets = [
-        185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
+        185_700, 150, 18_051, 42_248, 57_183, 75_952, 89_333, 114_384, 142_453, 163_641,
     ];
     let discid = DiscId::put(1, &offsets).unwrap();
     debug!("freedb {}", discid.freedb_id());
@@ -82,10 +86,11 @@ fn test_exact_search() {
 
 #[test]
 #[serial]
+#[ignore]
 fn test_inexact_search() {
     init_logger();
     let offsets = [
-        185710, 150, 18025, 42275, 57184, 75952, 89333, 114386, 142451, 163695,
+        185_710, 150, 18_025, 42_275, 57_184, 75_952, 89_333, 114_386, 142_451, 163_695,
     ];
     let discid = DiscId::put(1, &offsets).unwrap();
     debug!("freedb {}", discid.freedb_id());

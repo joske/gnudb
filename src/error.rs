@@ -16,7 +16,7 @@ impl From<ureq::Error> for GnuDbError {
     fn from(err: ureq::Error) -> Self {
         match err {
             ureq::Error::StatusCode(code) => {
-                GnuDbError::ProtocolError(format!("HTTP status {}", code))
+                GnuDbError::ProtocolError(format!("HTTP status {code}"))
             }
             _ => GnuDbError::ConnectionError(err.to_string()),
         }

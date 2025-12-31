@@ -1,3 +1,4 @@
+#![allow(clippy::missing_errors_doc)]
 //! Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)
 //!
 //! Right now only login, query and read are implemented, both over HTTP and CDDBP protocol.
@@ -85,7 +86,7 @@ pub struct Track {
     pub composer: Option<String>,
 }
 
-/// HTTP query to a GNUDb server for a given discid
+/// HTTP query to a `GNUDb` server for a given discid
 /// returns a vector of matches or an error
 /// Every query creates a new connection
 pub fn http_query(host: &str, port: u16, discid: &DiscId) -> Result<Vec<Match>, GnuDbError> {
@@ -94,22 +95,22 @@ pub fn http_query(host: &str, port: u16, discid: &DiscId) -> Result<Vec<Match>, 
     let body = http::http_request(host, port, cmd)?;
 
     let data = parser::parse_raw_response(&body)?;
-    debug!("HTTP response data:\n{}", data);
+    debug!("HTTP response data:\n{data}");
     parser::parse_query_response(&data)
 }
 
-/// HTTP read to a GNUDb server to fetch a single disc's metadata
+/// HTTP read to a `GNUDb` server to fetch a single disc's metadata
 /// Every request creates a new connection
 pub fn http_read(host: &str, port: u16, single_match: &Match) -> Result<Disc, GnuDbError> {
     let cmd = parser::create_read_cmd(single_match);
     let cmd = cmd.trim_end();
     let body = http::http_request(host, port, cmd)?;
-    let disc = parser::parse_read_response(body)?;
-    debug!("disc:{:?}", disc);
+    let disc = parser::parse_read_response(&body)?;
+    debug!("disc:{disc:?}");
     Ok(disc)
 }
 
-/// Represents a CDDBP connection to a GNUDb server
+/// Represents a CDDBP connection to a `GNUDb` server
 /// Multiple commands can be sent over the same connection
 pub struct Connection {
     reader: BufReader<TcpStream>,
@@ -118,7 +119,7 @@ pub struct Connection {
 impl Connection {
     /// create a new connection to given host:port combination
     pub async fn from_host_port(host: &str, port: u16) -> Result<Connection, GnuDbError> {
-        let s = format!("{}:{}", host, port);
+        let s = format!("{host}:{port}");
         cddbp::connect(s).await
     }
 

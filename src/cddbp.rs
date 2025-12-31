@@ -53,8 +53,8 @@ pub(crate) async fn cddb_read(
 ) -> Result<Disc, GnuDbError> {
     let cmd = create_read_cmd(single_match);
     let data = send_command(reader, cmd).await?;
-    let disc = parse_read_response(data)?;
-    debug!("disc:{:?}", disc);
+    let disc = parse_read_response(&data)?;
+    debug!("disc:{disc:?}");
     Ok(disc)
 }
 
@@ -87,10 +87,10 @@ async fn send_command(
 
 async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<String, GnuDbError> {
     reader.get_mut().write_all(cmd.as_bytes()).await?;
-    debug!("sent {}", cmd);
+    debug!("sent {cmd}");
     let mut status = String::new();
     read_line_with_timeout(reader, &mut status).await?;
-    debug!("response: {}", status);
+    debug!("response: {status}");
 
     let second_digit = status.chars().nth(1).ok_or(GnuDbError::ProtocolError(
         "failed to parse response code".to_string(),
@@ -101,7 +101,7 @@ async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<S
         loop {
             let mut line = String::new();
             let result = read_line_with_timeout(reader, &mut line).await;
-            debug!("response: {}", line);
+            debug!("response: {line}");
             match result {
                 Ok(_) => {
                     if line.trim_end_matches(['\r', '\n']).eq(".") {
@@ -110,10 +110,9 @@ async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<S
                     raw.push_str(&line);
                 }
                 Err(e) => {
-                    debug!("Failed to receive data: {}", e);
+                    debug!("Failed to receive data: {e}");
                     return Err(GnuDbError::ProtocolError(format!(
-                        "failed to read line: {}",
-                        e
+                        "failed to read line: {e}"
                     )));
                 }
             }
