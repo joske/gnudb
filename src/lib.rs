@@ -43,7 +43,7 @@
 //! ```
 
 use log::debug;
-use smol::{io::BufReader, net::TcpStream, prelude::*};
+use smol::{Timer, io::BufReader, net::TcpStream, prelude::*};
 use std::{net::Shutdown, time::Duration};
 
 use discid::DiscId;
@@ -180,7 +180,15 @@ fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, GnuDbError> 
 
 /// connect the tcp stream, login and set the protocol to 6
 async fn connect(s: String) -> Result<Connection, GnuDbError> {
-    let stream = TcpStream::connect(&s).await?;
+    let stream = TcpStream::connect(&s)
+        .or(async {
+            Timer::after(Duration::from_secs(10)).await;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "connection timed out",
+            ))
+        })
+        .await?;
     let mut reader = BufReader::new(stream);
     debug!("Successfully connected to server {}", &s);
     // say hello -> this is the login
