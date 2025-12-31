@@ -49,12 +49,15 @@ use std::net::Shutdown;
 use discid::DiscId;
 use error::GnuDbError;
 
-pub mod error;
 mod cddbp;
+pub mod error;
 mod http;
 mod parser;
 
+use std::time::Duration;
+
 pub(crate) const HELLO_STRING: &str = "ripperx localhost ripperx 4";
+pub(crate) const TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Default, Debug, Clone)]
 pub struct Match {
@@ -92,7 +95,7 @@ pub fn http_query(host: &str, port: u16, discid: &DiscId) -> Result<Vec<Match>, 
 
     let data = parser::parse_raw_response(&body)?;
     debug!("HTTP response data:\n{}", data);
-    parser::parse_query_response(data)
+    parser::parse_query_response(&data)
 }
 
 /// HTTP read to a GNUDb server to fetch a single disc's metadata

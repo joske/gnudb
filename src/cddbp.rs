@@ -1,19 +1,19 @@
 use log::debug;
-use smol::{io::BufReader, net::TcpStream, prelude::*, Timer};
-use std::time::Duration;
+use smol::{Timer, io::BufReader, net::TcpStream, prelude::*};
 
 use crate::error::GnuDbError;
-use crate::parser::{parse_query_response, parse_raw_response, parse_read_response, create_read_cmd};
-use crate::{Connection, Disc, Match, HELLO_STRING};
+use crate::parser::{
+    create_read_cmd, parse_query_response, parse_raw_response, parse_read_response,
+};
+use crate::{Connection, Disc, HELLO_STRING, Match, TIMEOUT};
 
 const PROTO_CMD: &str = "proto 6\n";
-const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// connect the tcp stream, login and set the protocol to 6
 pub(crate) async fn connect(s: String) -> Result<Connection, GnuDbError> {
     let stream = TcpStream::connect(&s)
         .or(async {
-            Timer::after(Duration::from_secs(10)).await;
+            Timer::after(TIMEOUT).await;
             Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "connection timed out",
@@ -41,7 +41,7 @@ pub(crate) async fn cddb_query(
     cmd: String,
 ) -> Result<Vec<Match>, GnuDbError> {
     let response = send_command(reader, cmd).await?;
-    let matches = parse_query_response(response)?;
+    let matches = parse_query_response(&response)?;
     Ok(matches)
 }
 
@@ -129,11 +129,13 @@ async fn read_line_with_timeout(
 ) -> Result<usize, GnuDbError> {
     let read = reader.read_line(buf);
     let timeout = async {
-        Timer::after(READ_TIMEOUT).await;
+        Timer::after(TIMEOUT).await;
         Err(std::io::Error::new(
             std::io::ErrorKind::TimedOut,
             "read timed out",
         ))
     };
-    smol::future::or(read, timeout).await.map_err(GnuDbError::from)
+    smol::future::or(read, timeout)
+        .await
+        .map_err(GnuDbError::from)
 }

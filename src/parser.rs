@@ -73,7 +73,7 @@ pub(crate) fn parse_raw_response(raw: &str) -> Result<String, GnuDbError> {
     Ok(data)
 }
 
-pub(crate) fn parse_query_response(response: String) -> Result<Vec<Match>, GnuDbError> {
+pub(crate) fn parse_query_response(response: &str) -> Result<Vec<Match>, GnuDbError> {
     let mut matches: Vec<Match> = Vec::new();
     for line in response.lines() {
         if line.starts_with("200") {
@@ -221,7 +221,6 @@ pub(crate) fn parse_read_response(data: String) -> Result<Disc, GnuDbError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::GnuDbError;
 
     fn init_logger() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -301,7 +300,7 @@ mod tests {
     #[test]
     fn test_no_match() {
         init_logger();
-        let matches = parse_query_response("202 No match for disc ID 000c4804.".to_string());
+        let matches = parse_query_response("202 No match for disc ID 000c4804.");
         assert!(matches.is_ok());
         let matches = matches.unwrap();
         assert_eq!(matches.len(), 0);
@@ -314,7 +313,7 @@ mod tests {
             rock abc123 Artist One / Album One\n\
             jazz def456 Artist Two / Album Two\n\
             blues ghi789 Artist Three / Album Three\n";
-        let matches = parse_query_response(response.to_string())?;
+        let matches = parse_query_response(response)?;
         assert_eq!(matches.len(), 3);
         assert_eq!(matches[0].category, "rock");
         assert_eq!(matches[0].discid, "abc123");
@@ -329,7 +328,7 @@ mod tests {
     fn test_parse_exact_match_response() -> Result<(), GnuDbError> {
         init_logger();
         let response = "200 rock abc123 The Artist / The Album\n";
-        let matches = parse_query_response(response.to_string())?;
+        let matches = parse_query_response(response)?;
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].category, "rock");
         assert_eq!(matches[0].discid, "abc123");
@@ -530,7 +529,8 @@ PLAYORDER=";
     #[test]
     fn test_missing_dyear() -> Result<(), GnuDbError> {
         init_logger();
-        let data = "DTITLE=Unknown Artist / Mystery Record\nDYEAR=\nDGENRE=Unknown\nTTITLE0=Track 01\n";
+        let data =
+            "DTITLE=Unknown Artist / Mystery Record\nDYEAR=\nDGENRE=Unknown\nTTITLE0=Track 01\n";
         let disc = parse_read_response(data.to_string())?;
         assert!(disc.year.is_none());
         assert_eq!(disc.title, "Mystery Record");
@@ -551,7 +551,8 @@ PLAYORDER=";
     #[test]
     fn test_valid_dyear_overrides_extd() -> Result<(), GnuDbError> {
         init_logger();
-        let data = "DTITLE=Artist / Title\nDYEAR=2001\nDGENRE=Rock\nTTITLE0=Song\nEXTD= YEAR: 1980\n";
+        let data =
+            "DTITLE=Artist / Title\nDYEAR=2001\nDGENRE=Rock\nTTITLE0=Song\nEXTD= YEAR: 1980\n";
         let disc = parse_read_response(data.to_string())?;
         assert_eq!(disc.year, Some(2001));
         Ok(())

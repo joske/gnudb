@@ -5,7 +5,7 @@ use discid::DiscId;
 use log::debug;
 use serial_test::serial;
 
-use crate::{http_query, http_read, Connection};
+use crate::{Connection, http_query, http_read};
 
 macro_rules! aw {
     ($e:expr) => {
