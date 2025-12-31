@@ -160,21 +160,23 @@ fn create_query_cmd(discid: &DiscId) -> Result<String, GnuDbError> {
 fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, GnuDbError> {
     let url = format!("http://{host}:{port}{HTTP_PATH}");
     debug!("HTTP request URL: {}", url);
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(10))
-        .timeout_read(Duration::from_secs(10))
-        .timeout_write(Duration::from_secs(10))
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(10)))
+        .timeout_connect(Some(Duration::from_secs(10)))
+        .timeout_recv_body(Some(Duration::from_secs(10)))
         .build();
-    let response = agent
+    let agent: ureq::Agent = config.into();
+    let mut response = agent
         .get(&url)
         .query("cmd", cmd)
         .query("hello", HELLO_STRING)
         .query("proto", "6")
         .call()
-        .map_err(|e| GnuDbError::ConnectionError(e.to_string()))?;
+        .map_err(|e: ureq::Error| GnuDbError::ConnectionError(e.to_string()))?;
     let body = response
-        .into_string()
-        .map_err(|e| GnuDbError::ProtocolError(e.to_string()))?;
+        .body_mut()
+        .read_to_string()
+        .map_err(|e: ureq::Error| GnuDbError::ProtocolError(e.to_string()))?;
     debug!("HTTP response body:\n{}", body);
     Ok(body)
 }
@@ -512,7 +514,7 @@ mod test {
 
     macro_rules! aw {
         ($e:expr) => {
-            tokio_test::block_on($e)
+            smol::block_on($e)
         };
     }
 
