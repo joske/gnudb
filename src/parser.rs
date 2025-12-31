@@ -89,16 +89,12 @@ pub(crate) fn parse_query_response(response: String) -> Result<Vec<Match>, GnuDb
             let remainder = split.next().ok_or(GnuDbError::ProtocolError(
                 "failed to parse exact match remainder".to_owned(),
             ))?;
-            let (artist, title) = remainder
-                .split_once(" / ")
-                .ok_or(GnuDbError::ProtocolError(
-                    "failed to parse artist/title".to_string(),
-                ))?;
+            let (artist, title) = split_artist_title(remainder)?;
             let m = Match {
                 discid: discid.to_owned(),
                 category: category.to_owned(),
-                title: title.to_owned(),
-                artist: artist.to_owned(),
+                title,
+                artist,
             };
             matches.push(m);
             break;
@@ -128,17 +124,23 @@ pub(crate) fn parse_matches(line: &str) -> Result<Match, GnuDbError> {
     let remainder = split.next().ok_or(GnuDbError::ProtocolError(
         "failed to parse remainder".to_owned(),
     ))?;
-    let (artist, title) = remainder
-        .split_once(" / ")
-        .ok_or(GnuDbError::ProtocolError(
-            "failed to parse artist/title".to_string(),
-        ))?;
+    let (artist, title) = split_artist_title(remainder)?;
     Ok(Match {
         discid: id.to_owned(),
         category: category.to_owned(),
-        title: title.to_owned(),
-        artist: artist.to_owned(),
+        title,
+        artist,
     })
+}
+
+fn split_artist_title(remainder: &str) -> Result<(String, String), GnuDbError> {
+    let (artist, title) = remainder
+        .split_once(" / ")
+        .or_else(|| remainder.split_once('/'))
+        .ok_or(GnuDbError::ProtocolError(
+            "failed to parse artist/title".to_string(),
+        ))?;
+    Ok((artist.trim().to_owned(), title.trim().to_owned()))
 }
 
 /// parse the full response from the CDDB server
@@ -361,6 +363,24 @@ mod tests {
     fn test_parse_matches_with_slash_in_title() -> Result<(), GnuDbError> {
         init_logger();
         let m = parse_matches("rock abc123 Artist / Title/With/Slashes")?;
+        assert_eq!(m.artist, "Artist");
+        assert_eq!(m.title, "Title/With/Slashes");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_matches_without_spaces() -> Result<(), GnuDbError> {
+        init_logger();
+        let m = parse_matches("rock abc123 Artist/Title")?;
+        assert_eq!(m.artist, "Artist");
+        assert_eq!(m.title, "Title");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_matches_slash_without_spaces_in_title() -> Result<(), GnuDbError> {
+        init_logger();
+        let m = parse_matches("rock abc123 Artist/Title/With/Slashes")?;
         assert_eq!(m.artist, "Artist");
         assert_eq!(m.title, "Title/With/Slashes");
         Ok(())
