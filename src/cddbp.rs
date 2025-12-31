@@ -7,6 +7,7 @@ use crate::parser::{parse_query_response, parse_raw_response, parse_read_respons
 use crate::{Connection, Disc, Match, HELLO_STRING};
 
 const PROTO_CMD: &str = "proto 6\n";
+const READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// connect the tcp stream, login and set the protocol to 6
 pub(crate) async fn connect(s: String) -> Result<Connection, GnuDbError> {
@@ -23,7 +24,7 @@ pub(crate) async fn connect(s: String) -> Result<Connection, GnuDbError> {
     debug!("Successfully connected to server {}", &s);
     // say hello -> this is the login
     let mut server_hello = String::new();
-    reader.read_line(&mut server_hello).await?;
+    read_line_with_timeout(&mut reader, &mut server_hello).await?;
     let our_hello = format!("cddb hello {HELLO_STRING}\n");
     send_command(&mut reader, our_hello).await?;
 
@@ -88,7 +89,7 @@ async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<S
     reader.get_mut().write_all(cmd.as_bytes()).await?;
     debug!("sent {}", cmd);
     let mut status = String::new();
-    reader.read_line(&mut status).await?;
+    read_line_with_timeout(reader, &mut status).await?;
     debug!("response: {}", status);
 
     let second_digit = status.chars().nth(1).ok_or(GnuDbError::ProtocolError(
@@ -99,7 +100,7 @@ async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<S
     if second_digit == '1' || second_digit == '2' {
         loop {
             let mut line = String::new();
-            let result = reader.read_line(&mut line).await;
+            let result = read_line_with_timeout(reader, &mut line).await;
             debug!("response: {}", line);
             match result {
                 Ok(_) => {
@@ -120,4 +121,19 @@ async fn read_response(reader: &mut BufReader<TcpStream>, cmd: &str) -> Result<S
     }
 
     Ok(raw)
+}
+
+async fn read_line_with_timeout(
+    reader: &mut BufReader<TcpStream>,
+    buf: &mut String,
+) -> Result<usize, GnuDbError> {
+    let read = reader.read_line(buf);
+    let timeout = async {
+        Timer::after(READ_TIMEOUT).await;
+        Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "read timed out",
+        ))
+    };
+    smol::future::or(read, timeout).await.map_err(GnuDbError::from)
 }
