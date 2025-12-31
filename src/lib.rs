@@ -236,17 +236,9 @@ fn parse_query_response(response: String) -> Result<Vec<Match>, GnuDbError> {
             let remainder = split.next().ok_or(GnuDbError::ProtocolError(
                 "failed to parse exact match remainder".to_owned(),
             ))?;
-            let mut split = remainder.split('/');
-            let artist = split
-                .next()
-                .ok_or(GnuDbError::ProtocolError(
-                    "failed to get artist".to_string(),
-                ))?
-                .trim();
-            let title = split
-                .next()
-                .ok_or(GnuDbError::ProtocolError("failed to get title".to_string()))?
-                .trim();
+            let (artist, title) = remainder
+                .split_once(" / ")
+                .ok_or(GnuDbError::ProtocolError("failed to parse artist/title".to_string()))?;
             let m = Match {
                 discid: discid.to_owned(),
                 category: category.to_owned(),
@@ -409,19 +401,9 @@ fn parse_matches(line: &str) -> Result<Match, GnuDbError> {
     let remainder = split.next().ok_or(GnuDbError::ProtocolError(
         "failed to parse remainder".to_owned(),
     ))?;
-    let mut split = remainder.split('/');
-    let artist = split
-        .next()
-        .ok_or(GnuDbError::ProtocolError(
-            "failed to parse artist".to_string(),
-        ))?
-        .trim();
-    let title = split
-        .next()
-        .ok_or(GnuDbError::ProtocolError(
-            "failed to parse title".to_string(),
-        ))?
-        .trim();
+    let (artist, title) = remainder
+        .split_once(" / ")
+        .ok_or(GnuDbError::ProtocolError("failed to parse artist/title".to_string()))?;
     Ok(Match {
         discid: id.to_owned(),
         category: category.to_owned(),
@@ -986,13 +968,21 @@ EXTD= YEAR: 1995
     }
 
     #[test]
-    fn test_parse_matches_splits_on_first_slash() -> Result<(), GnuDbError> {
+    fn test_parse_matches_with_slash_in_artist() -> Result<(), GnuDbError> {
         init_logger();
-        // Note: current parser splits on first `/`, not ` / `
-        // Artist names containing `/` (like AC/DC) won't parse correctly
-        let m = super::parse_matches("rock abc123 Artist Name / Album Title")?;
-        assert_eq!(m.artist, "Artist Name");
-        assert_eq!(m.title, "Album Title");
+        // Parser splits on ` / ` (with spaces), so AC/DC works correctly
+        let m = super::parse_matches("rock abc123 AC/DC / Back In Black")?;
+        assert_eq!(m.artist, "AC/DC");
+        assert_eq!(m.title, "Back In Black");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_matches_with_slash_in_title() -> Result<(), GnuDbError> {
+        init_logger();
+        let m = super::parse_matches("rock abc123 Artist / Title/With/Slashes")?;
+        assert_eq!(m.artist, "Artist");
+        assert_eq!(m.title, "Title/With/Slashes");
         Ok(())
     }
 
