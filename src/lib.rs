@@ -171,26 +171,22 @@ fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, GnuDbError> 
         .query("cmd", cmd)
         .query("hello", HELLO_STRING)
         .query("proto", "6")
-        .call()
-        .map_err(|e: ureq::Error| GnuDbError::ConnectionError(e.to_string()))?;
-    let body = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|e: ureq::Error| GnuDbError::ProtocolError(e.to_string()))?;
+        .call()?;
+    let body = response.body_mut().read_to_string()?;
     debug!("HTTP response body:\n{}", body);
     Ok(body)
 }
 
 /// connect the tcp stream, login and set the protocol to 6
 async fn connect(s: String) -> Result<Connection, GnuDbError> {
-    let stream = TcpStream::connect(s.clone()).await?;
+    let stream = TcpStream::connect(&s).await?;
     let mut reader = BufReader::new(stream);
-    debug!("Successfully connected to server {}", s.clone());
+    debug!("Successfully connected to server {}", &s);
     // say hello -> this is the login
-    let mut hello = String::new();
-    reader.read_line(&mut hello).await?;
-    let hello = format!("cddb hello {HELLO_STRING}\n");
-    send_command(&mut reader, hello).await?;
+    let mut server_hello = String::new();
+    reader.read_line(&mut server_hello).await?;
+    let our_hello = format!("cddb hello {HELLO_STRING}\n");
+    send_command(&mut reader, our_hello).await?;
 
     // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
     const PROTO_CMD: &str = "proto 6\n";
@@ -280,11 +276,10 @@ async fn cddb_read(
 }
 
 fn create_read_cmd(single_match: &Match) -> String {
-    let cmd = format!(
+    format!(
         "cddb read {} {}\n",
         single_match.category, single_match.discid
-    );
-    cmd
+    )
 }
 
 /// send a CDDBP command, and parse its output, according to the protocol specs:
