@@ -20,8 +20,9 @@ pub(crate) fn http_request(host: &str, port: u16, cmd: &str) -> Result<String, G
         .query("cmd", cmd)
         .query("hello", HELLO_STRING)
         .query("proto", "6")
-        .call()?;
-    let body = response.body_mut().read_to_string()?;
+        .call()
+        .map_err(GnuDbError::from)?;
+    let body = response.body_mut().read_to_string().map_err(GnuDbError::from)?;
     debug!("HTTP response body:\n{}", body);
     Ok(body)
 }
