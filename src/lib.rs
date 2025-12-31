@@ -52,6 +52,7 @@ use error::GnuDbError;
 pub mod error;
 
 const HELLO_STRING: &str = "ripperx localhost ripperx 4";
+const PROTO_CMD: &str = "proto 6\n";
 const HTTP_PATH: &str = "/~cddb/cddb.cgi";
 
 #[derive(Default, Debug, Clone)]
@@ -189,9 +190,7 @@ async fn connect(s: String) -> Result<Connection, GnuDbError> {
     send_command(&mut reader, our_hello).await?;
 
     // switch to protocol level 6, so the output of GNUDB contains DYEAR and DGENRE
-    const PROTO_CMD: &str = "proto 6\n";
-    let proto = PROTO_CMD.to_owned();
-    send_command(&mut reader, proto).await?;
+    send_command(&mut reader, PROTO_CMD.to_owned()).await?;
     Ok(Connection { reader })
 }
 
