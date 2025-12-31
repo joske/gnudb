@@ -861,4 +861,186 @@ TTITLE0=Track Zero
 TTITLE1=Track One
 EXTD= YEAR: 1995
 ";
+
+    // Additional test cases
+
+    #[test]
+    fn test_parse_response_4xx_error() {
+        let raw = "401 Permission denied\n";
+        let err = super::parse_raw_response(raw).unwrap_err();
+        match err {
+            GnuDbError::ProtocolError(msg) => assert!(msg.contains("401")),
+            _ => panic!("unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_inexact_matches() -> Result<(), GnuDbError> {
+        init_logger();
+        let response = "211 Found inexact matches, list follows\n\
+            rock abc123 Artist One / Album One\n\
+            jazz def456 Artist Two / Album Two\n\
+            blues ghi789 Artist Three / Album Three\n";
+        let matches = super::parse_query_response(response.to_string())?;
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].category, "rock");
+        assert_eq!(matches[0].discid, "abc123");
+        assert_eq!(matches[0].artist, "Artist One");
+        assert_eq!(matches[0].title, "Album One");
+        assert_eq!(matches[1].category, "jazz");
+        assert_eq!(matches[2].category, "blues");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_exact_match_response() -> Result<(), GnuDbError> {
+        init_logger();
+        let response = "200 rock abc123 The Artist / The Album\n";
+        let matches = super::parse_query_response(response.to_string())?;
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].category, "rock");
+        assert_eq!(matches[0].discid, "abc123");
+        assert_eq!(matches[0].artist, "The Artist");
+        assert_eq!(matches[0].title, "The Album");
+        Ok(())
+    }
+
+    #[test]
+    fn test_dtitle_without_artist() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Just A Title\nDYEAR=2000\nTTITLE0=Track\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert_eq!(disc.title, "Just A Title");
+        assert_eq!(disc.artist, "");
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_genre() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=\nTTITLE0=Track\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert!(disc.genre.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_whitespace_only_genre() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=   \nTTITLE0=Track\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert!(disc.genre.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_disc_with_no_tracks() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Artist / Album\nDYEAR=2000\nDGENRE=Rock\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert_eq!(disc.tracks.len(), 0);
+        assert_eq!(disc.title, "Album");
+        Ok(())
+    }
+
+    #[test]
+    fn test_track_with_special_characters() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Artist / Album\nTTITLE0=Track with / slash\nTTITLE1=Track (with) [brackets] & symbols!\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert_eq!(disc.tracks.len(), 2);
+        assert_eq!(disc.tracks[0].title, "Track with / slash");
+        assert_eq!(disc.tracks[1].title, "Track (with) [brackets] & symbols!");
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_read_cmd() {
+        let m = super::Match {
+            discid: "abc123".to_string(),
+            category: "rock".to_string(),
+            artist: "Artist".to_string(),
+            title: "Title".to_string(),
+        };
+        let cmd = super::create_read_cmd(&m);
+        assert_eq!(cmd, "cddb read rock abc123\n");
+    }
+
+    #[test]
+    fn test_parse_response_no_newline() -> Result<(), GnuDbError> {
+        let raw = "200 OK";
+        let data = super::parse_raw_response(raw)?;
+        assert_eq!(data, "200 OK");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_response_3xx_error() {
+        // 3xx with second digit not 0/1/2 should error
+        let raw = "330 connection closing\n";
+        let err = super::parse_raw_response(raw).unwrap_err();
+        match err {
+            GnuDbError::ProtocolError(_) => {}
+            _ => panic!("unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_parse_matches_splits_on_first_slash() -> Result<(), GnuDbError> {
+        init_logger();
+        // Note: current parser splits on first `/`, not ` / `
+        // Artist names containing `/` (like AC/DC) won't parse correctly
+        let m = super::parse_matches("rock abc123 Artist Name / Album Title")?;
+        assert_eq!(m.artist, "Artist Name");
+        assert_eq!(m.title, "Album Title");
+        Ok(())
+    }
+
+    #[test]
+    fn test_year_overflow() -> Result<(), GnuDbError> {
+        init_logger();
+        // Year too large for u16
+        let data = "DTITLE=Artist / Album\nDYEAR=99999\nTTITLE0=Track\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        // Should fail to parse and fall through without setting year
+        assert!(disc.year.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn test_extd_year_not_used_when_dyear_valid() -> Result<(), GnuDbError> {
+        init_logger();
+        let data = "DTITLE=Artist / Album\nDYEAR=2020\nTTITLE0=Track\nEXTD= YEAR: 1999\n";
+        let disc = super::parse_read_response(data.to_string())?;
+        assert_eq!(disc.year, Some(2020));
+        Ok(())
+    }
+
+    #[test]
+    fn test_dotstuff_multiple_dots() -> Result<(), GnuDbError> {
+        let raw = "210 data\n...\n...test\n.\n";
+        let data = super::parse_raw_response(raw)?;
+        assert_eq!(data, "..\n..test\n");
+        Ok(())
+    }
+
+    #[test]
+    fn test_empty_response_body() -> Result<(), GnuDbError> {
+        let raw = "210 data\n.\n";
+        let data = super::parse_raw_response(raw)?;
+        assert_eq!(data, "");
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_matches_missing_title() {
+        let result = super::parse_matches("rock abc123 Artist Only");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_matches_empty_line() {
+        let result = super::parse_matches("");
+        assert!(result.is_err());
+    }
 }
