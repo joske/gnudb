@@ -1,5 +1,6 @@
 // Network/integration tests
 // These use #[serial] because gnudb doesn't like multiple connections from same IP
+// These tests are ignored by default to avoid network calls on CI
 
 use discid::DiscId;
 use log::debug;
