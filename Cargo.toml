@@ -1,6 +1,6 @@
 [package]
 name = "gnudb"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
 readme = "README.md"
@@ -11,7 +11,7 @@ keywords = ["CDDB", "freedb", "gnudb"]
 
 [dependencies]
 smol = "2.0"
-discid = "0.6"
+discid = "0.7"
 thiserror = "2.0"
 log = "0.4"
 ureq = "3.1"
