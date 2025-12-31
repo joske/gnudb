@@ -14,6 +14,7 @@ smol = "2.0"
 discid = "0.5"
 thiserror = "2.0"
 log = "0.4"
+ureq = "2.10"
 
 [dev-dependencies]
 tokio-test = "0.4"
