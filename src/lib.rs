@@ -143,6 +143,11 @@ async fn cddb_query(
     cmd: String,
 ) -> Result<Vec<Match>, GnuDbError> {
     let response = send_command(reader, cmd).await?;
+    let matches = parse_query_response(response)?;
+    Ok(matches)
+}
+
+fn parse_query_response(response: String) -> Result<Vec<Match>, GnuDbError> {
     let mut matches: Vec<Match> = Vec::new();
     for line in response.lines() {
         if line.starts_with("200") {
@@ -420,6 +425,7 @@ fn parse_data(data: String) -> Result<Disc, GnuDbError> {
 mod test {
     use discid::DiscId;
     use log::debug;
+    use serial_test::serial;
 
     use crate::{Connection, error::GnuDbError};
 
@@ -434,6 +440,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_good_url() {
         init_logger();
         let con = aw!(Connection::from_host_port("gnudb.gnudb.org", 8880));
@@ -441,6 +448,7 @@ mod test {
     }
 
     #[test]
+    #[serial]
     fn test_bad_url() {
         init_logger();
         let con = aw!(Connection::from_host_port("localhost", 80));
@@ -448,7 +456,8 @@ mod test {
     }
 
     #[test]
-    fn test_search() {
+    #[serial]
+    fn test_exact_search() {
         init_logger();
         let offsets = [
             185700, 150, 18051, 42248, 57183, 75952, 89333, 114384, 142453, 163641,
@@ -472,19 +481,7 @@ mod test {
     }
 
     #[test]
-    fn test_search_bad_discid() {
-        init_logger();
-        let offsets = [235823, 0, 0, 0, 0];
-        let discid = DiscId::put(3, &offsets).unwrap();
-        debug!("freedb {}", discid.freedb_id());
-        let mut con = aw!(Connection::new()).unwrap();
-        let matches = aw!(con.query(&discid));
-        assert!(matches.is_ok());
-        let matches = matches.unwrap();
-        assert_eq!(matches.len(), 0);
-    }
-
-    #[test]
+    #[serial]
     fn test_inexact_search() {
         init_logger();
         let offsets = [
@@ -506,6 +503,17 @@ mod test {
         assert_eq!(disc.title, "Dire Straits");
         assert_eq!(disc.artist, "DIRE STRAITS");
         assert_eq!(disc.year, Some(1978));
+    }
+
+    // Tests below don't require a network connection and so can be run in parallel
+
+    #[test]
+    fn test_no_match() {
+        init_logger();
+        let matches = super::parse_query_response(NO_MATCH.to_string());
+        assert!(matches.is_ok());
+        let matches = matches.unwrap();
+        assert_eq!(matches.len(), 0);
     }
 
     #[test]
@@ -588,6 +596,8 @@ mod test {
         assert_eq!(disc.tracks[1].artist, "Sample Artist");
         Ok(())
     }
+
+    const NO_MATCH: &str = "202 No match for disc ID 000c4804.";
 
     const RAMMSTEIN: &str = r"# xmcd
 #
