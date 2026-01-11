@@ -174,7 +174,6 @@ pub(crate) fn parse_read_response(data: &str) -> Result<Disc, GnuDbError> {
 
         if let Some(value) = line.strip_prefix("# Disc length:") {
             disc_length_secs = value
-                .trim()
                 .split_whitespace()
                 .next()
                 .and_then(|token| token.parse::<u64>().ok());
@@ -260,7 +259,7 @@ fn apply_track_durations(tracks: &mut [Track], offsets: &[u64], disc_length_secs
         let Some(start) = offsets.get(idx).copied() else {
             break;
         };
-        let end = offsets.get(idx + 1).copied().or_else(|| total_frames);
+        let end = offsets.get(idx + 1).copied().or(total_frames);
         if let Some(end_frames) = end {
             let frames = end_frames.saturating_sub(start);
             track.duration = frames / 75;

@@ -20,7 +20,7 @@ fn init_logger() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "requires network"]
 fn test_good_url() {
     init_logger();
     let con = aw!(Connection::from_host_port("gnudb.gnudb.org", 8880));
@@ -29,7 +29,7 @@ fn test_good_url() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "requires network"]
 fn test_bad_url() {
     init_logger();
     let con = aw!(Connection::from_host_port("localhost", 80));
@@ -38,7 +38,7 @@ fn test_bad_url() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "requires network"]
 fn test_http_exact_search() {
     init_logger();
     let offsets = [
@@ -62,7 +62,7 @@ fn test_http_exact_search() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "requires network"]
 fn test_exact_search() {
     init_logger();
     let offsets = [
@@ -87,7 +87,7 @@ fn test_exact_search() {
 
 #[test]
 #[serial]
-#[ignore]
+#[ignore = "requires network"]
 fn test_inexact_search() {
     init_logger();
     let offsets = [
