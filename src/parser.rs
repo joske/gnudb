@@ -149,7 +149,38 @@ pub(crate) fn parse_read_response(data: &str) -> Result<Disc, GnuDbError> {
     let mut disc = Disc {
         ..Default::default()
     };
+    let mut reading_offsets = false;
+    let mut track_offsets: Vec<u64> = Vec::new();
+    let mut disc_length_secs: Option<u64> = None;
     for line in data.lines() {
+        if line.starts_with("# Track frame offsets:") {
+            reading_offsets = true;
+            continue;
+        }
+
+        if reading_offsets {
+            if let Some(value) = line.strip_prefix('#') {
+                let trimmed = value.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Ok(offset) = trimmed.parse::<u64>() {
+                    track_offsets.push(offset);
+                    continue;
+                }
+            }
+            reading_offsets = false;
+        }
+
+        if let Some(value) = line.strip_prefix("# Disc length:") {
+            disc_length_secs = value
+                .trim()
+                .split_whitespace()
+                .next()
+                .and_then(|token| token.parse::<u64>().ok());
+            continue;
+        }
+
         if let Some(value) = line.strip_prefix("DTITLE=") {
             let mut split = value.splitn(2, '/');
             let first = split.next().unwrap_or("").trim();
@@ -215,7 +246,26 @@ pub(crate) fn parse_read_response(data: &str) -> Result<Disc, GnuDbError> {
             disc.tracks.push(track);
         }
     }
+    apply_track_durations(&mut disc.tracks, &track_offsets, disc_length_secs);
     Ok(disc)
+}
+
+fn apply_track_durations(tracks: &mut [Track], offsets: &[u64], disc_length_secs: Option<u64>) {
+    if tracks.is_empty() || offsets.len() < tracks.len() {
+        return;
+    }
+    let total_frames = disc_length_secs.map(|secs| secs.saturating_mul(75));
+
+    for (idx, track) in tracks.iter_mut().enumerate() {
+        let Some(start) = offsets.get(idx).copied() else {
+            break;
+        };
+        let end = offsets.get(idx + 1).copied().or_else(|| total_frames);
+        if let Some(end_frames) = end {
+            let frames = end_frames.saturating_sub(start);
+            track.duration = frames / 75;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -511,6 +561,18 @@ PLAYORDER=";
         assert_eq!(disc.title, "(black) Mutter");
         assert_eq!(disc.tracks.len(), 11);
         assert_eq!(disc.genre.unwrap(), "Industrial Metal");
+        Ok(())
+    }
+
+    #[test]
+    fn test_track_durations_from_offsets() -> Result<(), GnuDbError> {
+        init_logger();
+        let disc = parse_read_response(RAMMSTEIN)?;
+        let durations: Vec<u64> = disc.tracks.iter().map(|t| t.duration).collect();
+        assert_eq!(
+            durations,
+            vec![332, 285, 321, 239, 231, 256, 295, 207, 367, 329, 317]
+        );
         Ok(())
     }
 

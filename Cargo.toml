@@ -1,6 +1,6 @@
 [package]
 name = "gnudb"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2024"
 description = "Crate to get CDDB information from gnudb.org (like cddb.com and freedb.org in the past)"
 readme = "README.md"
