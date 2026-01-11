@@ -58,6 +58,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install libdiscid
+        run: sudo apt-get update && sudo apt-get install -y libdiscid-dev
+
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
 
