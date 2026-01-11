@@ -12,6 +12,45 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check HEAD has a tag
+        id: get_tag
+        run: |
+          TAG=$(git tag --points-at HEAD | head -n1)
+          if [ -z "$TAG" ]; then
+            echo "Error: HEAD commit has no tag. Please tag this commit before publishing."
+            exit 1
+          fi
+          echo "Found tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check tag matches Cargo.toml version
+        run: |
+          TAG="${{ steps.get_tag.outputs.tag }}"
+          # Strip leading 'v' if present (v0.4.1 -> 0.4.1)
+          VERSION="${TAG#v}"
+          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          if [ "$VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: Tag version ($VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          echo "Tag matches Cargo.toml version: $VERSION"
+
+      - name: Check version not already on crates.io
+        run: |
+          TAG="${{ steps.get_tag.outputs.tag }}"
+          # Strip leading 'v' if present (v0.4.1 -> 0.4.1)
+          VERSION="${TAG#v}"
+          echo "Checking if gnudb $VERSION exists on crates.io..."
+
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/gnudb/$VERSION")
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "Error: Version $VERSION already exists on crates.io"
+            exit 1
+          fi
+          echo "Version $VERSION not yet published, proceeding."
 
       - name: Install Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
