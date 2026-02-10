@@ -14,7 +14,7 @@ smol = "2.0"
 discid = "0.7"
 thiserror = "2.0"
 log = "0.4"
-ureq = "3.1"
+ureq = "3.2"
 
 [dev-dependencies]
 env_logger = "0.11"
